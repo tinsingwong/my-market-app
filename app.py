@@ -8,7 +8,7 @@ from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="全球市場行情儀表板", layout="centered", page_icon="📈")
 
-# 自訂 CSS：縮小 st.metric 數值字體大小，保持畫面整齊
+# 自訂 CSS：縮小頂部指標數值字體
 st.markdown("""
 <style>
 div[data-testid="stMetricValue"] > div {
@@ -57,14 +57,13 @@ tab_fx, tab_hk, tab_ca, tab_us, tab_tech = st.tabs([
     "🇭🇰 香港股市", 
     "🇨🇦 加拿大股市", 
     "🇺🇸 美國股市",
-    "🔍 技術分析 (RSI/通道)"
+    "🔍 技術分析 (陰陽燭/成交量/RSI)"
 ])
 
 PERIOD_MAP = {"1個月": "1mo", "6個月": "6mo", "1年": "1y", "5年": "5y"}
 
-# 常見港股與熱門股票中文對照表 (可隨時擴充)
+# 常見港股與熱門股票中文對照表
 CHINESE_NAME_MAP = {
-    # 港股指數與藍籌
     "^HSI": "恒生指數",
     "0001.HK": "長和",
     "0002.HK": "中電控股",
@@ -121,7 +120,6 @@ CHINESE_NAME_MAP = {
     "9961.HK": "攜程集團",
     "9988.HK": "阿里巴巴",
     "9999.HK": "網易",
-    # 常用美股 / 加股
     "AAPL": "蘋果公司",
     "MSFT": "微軟公司",
     "NVDA": "輝達 / 英偉達",
@@ -274,10 +272,10 @@ with tab_us:
     render_simple_chart(US_WATCHLIST[selected_us], selected_us, us_range, line_color="#619CFF")
 
 # ==========================================
-# 分頁 5：獨立技術分析 (支援港股中文名 + 英文全名)
+# 分頁 5：陰陽燭 + 買賣成交量 (綠買紅沽) + 保力加通道 + RSI
 # ==========================================
 with tab_tech:
-    st.caption("輸入任意股票代號，自動繪製 14 天 RSI 與保力加通道 (Bollinger Bands)")
+    st.caption("輸入任意股票代號，查看陰陽燭 K 線、買沽成交量、保力加通道與 14 天 RSI")
 
     search_col1, search_col2 = st.columns([3, 1])
     with search_col1:
@@ -291,14 +289,13 @@ with tab_tech:
     with search_col2:
         search_range = st.selectbox(
             "查看週期：",
-            ["6個月", "1年", "2年"],
-            index=0,
+            ["3個月", "6個月", "1年", "2年"],
+            index=1,
             key="tech_range_select"
         )
 
-    PERIOD_SEARCH_MAP = {"6個月": "6mo", "1年": "1y", "2年": "2y"}
+    PERIOD_SEARCH_MAP = {"3個月": "3mo", "6個月": "6mo", "1年": "1y", "2年": "2y"}
 
-    # 自動智能格式化港股代號 (若使用者只輸入 700 或 0700，自動轉換為 0700.HK)
     search_symbol = raw_input
     if raw_input.isdigit():
         search_symbol = f"{int(raw_input):04d}.HK"
@@ -311,7 +308,6 @@ with tab_tech:
             if hist.empty:
                 st.warning(f"查無標的 `{search_symbol}`，請確認代號格式是否正確。")
             else:
-                # 取得英文全名
                 eng_name = search_symbol
                 try:
                     info_dict = stock.info
@@ -319,14 +315,8 @@ with tab_tech:
                 except Exception:
                     eng_name = search_symbol
 
-                # 匹配中文名
                 chinese_name = CHINESE_NAME_MAP.get(search_symbol, "")
-
-                # 組合顯示標題
-                if chinese_name:
-                    display_title = f"{chinese_name} {eng_name} ({search_symbol})"
-                else:
-                    display_title = f"{eng_name} ({search_symbol})"
+                display_title = f"{chinese_name} {eng_name} ({search_symbol})" if chinese_name else f"{eng_name} ({search_symbol})"
 
                 st.subheader(f"🏢 {display_title}")
 
@@ -345,6 +335,12 @@ with tab_tech:
                 rs = avg_gain / avg_loss
                 hist["RSI14"] = 100 - (100 / (1 + rs))
 
+                # 3. 判斷每日買盤 / 沽盤顏色 (收盤 >= 開盤 為綠色買盤，反之為紅色沽盤)
+                colors_volume = [
+                    "#26a69a" if close_val >= open_val else "#ef5350"
+                    for open_val, close_val in zip(hist["Open"], hist["Close"])
+                ]
+
                 last_row = hist.iloc[-1]
                 prev_close = hist["Close"].iloc[-2] if len(hist) > 1 else last_row["Close"]
                 
@@ -358,7 +354,7 @@ with tab_tech:
                 delta_pct = (delta_val / prev_close) * 100
                 delta_display = f"{delta_val:+.2f} ({delta_pct:+.2f}%)"
 
-                # 頂部四格指標卡片
+                # 頂部四格數據卡片
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("當前最新價", f"{price:.2f} {curr}", delta_display)
                 c2.metric("最新成交量", f"{volume:,.0f}")
@@ -366,16 +362,31 @@ with tab_tech:
                 c3.metric("14天 RSI", f"{rsi:.1f}{rsi_status}")
                 c4.metric("保力加中軌(20MA)", f"{bb_mid:.2f} {curr}")
 
-                # 繪製雙層技術圖表
+                # 建立三層子圖 (主圖 60% 高度, 成交量 20%, RSI 20%)
                 fig = make_subplots(
-                    rows=2, cols=1, 
+                    rows=3, cols=1, 
                     shared_xaxes=True, 
-                    vertical_spacing=0.08,
-                    row_heights=[0.7, 0.3],
-                    subplot_titles=(f"{display_title} 價格走勢與保力加通道 (Bollinger Bands)", "14 天相對強弱指標 (RSI)")
+                    vertical_spacing=0.04,
+                    row_heights=[0.60, 0.20, 0.20],
+                    subplot_titles=(
+                        f"{display_title} 陰陽燭與保力加通道",
+                        "成交量 (綠: 買入佔優 / 紅: 沽出佔優)",
+                        "14 天相對強弱指標 (RSI)"
+                    )
                 )
 
-                # 保力加通道
+                # --- 第 1 層：陰陽燭 + 保力加通道 ---
+                fig.add_trace(go.Candlestick(
+                    x=hist.index,
+                    open=hist["Open"],
+                    high=hist["High"],
+                    low=hist["Low"],
+                    close=hist["Close"],
+                    name="陰陽燭",
+                    increasing_line_color="#26a69a",  # 陽燭綠色
+                    decreasing_line_color="#ef5350"  # 陰燭紅色
+                ), row=1, col=1)
+
                 fig.add_trace(go.Scatter(
                     x=hist.index, y=hist["BB_Upper"],
                     line=dict(color="rgba(150, 150, 150, 0.4)", width=1, dash="dash"),
@@ -386,41 +397,45 @@ with tab_tech:
                     x=hist.index, y=hist["BB_Lower"],
                     line=dict(color="rgba(150, 150, 150, 0.4)", width=1, dash="dash"),
                     fill='tonexty',
-                    fillcolor='rgba(200, 200, 200, 0.1)',
-                    name="BB 通道範圍"
+                    fillcolor='rgba(200, 200, 200, 0.08)',
+                    name="BB 通道"
                 ), row=1, col=1)
 
                 fig.add_trace(go.Scatter(
                     x=hist.index, y=hist["MA20"],
                     line=dict(color="orange", width=1.5),
-                    name="20日均線 (中軌)"
+                    name="20日均線"
                 ), row=1, col=1)
 
-                fig.add_trace(go.Scatter(
-                    x=hist.index, y=hist["Close"],
-                    line=dict(color="#29b5e8", width=2),
-                    name="收盤價"
-                ), row=1, col=1)
+                # --- 第 2 層：成交量直方圖 (綠買紅沽) ---
+                fig.add_trace(go.Bar(
+                    x=hist.index,
+                    y=hist["Volume"],
+                    marker_color=colors_volume,
+                    name="成交量"
+                ), row=2, col=1)
 
-                # RSI
+                # --- 第 3 層：14 天 RSI ---
                 fig.add_trace(go.Scatter(
                     x=hist.index, y=hist["RSI14"],
                     line=dict(color="#ab63fa", width=2),
                     name="RSI 14"
-                ), row=2, col=1)
+                ), row=3, col=1)
 
-                fig.add_hline(y=70, line_dash="dot", line_color="red", row=2, col=1)
-                fig.add_hline(y=30, line_dash="dot", line_color="green", row=2, col=1)
+                fig.add_hline(y=70, line_dash="dot", line_color="red", row=3, col=1)
+                fig.add_hline(y=30, line_dash="dot", line_color="green", row=3, col=1)
 
+                # 關閉預設的下方 range slider，保持版面緊湊
                 fig.update_layout(
+                    xaxis_rangeslider_visible=False,
                     margin=dict(l=10, r=10, t=30, b=10),
-                    height=520,
-                    xaxis2_title="日期",
+                    height=640,
                     yaxis_title=f"價格 ({curr})",
-                    yaxis2_title="RSI (0-100)",
+                    yaxis2_title="成交量",
+                    yaxis3_title="RSI",
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
-                fig.update_yaxes(range=[0, 100], row=2, col=1)
+                fig.update_yaxes(range=[0, 100], row=3, col=1)
 
                 st.plotly_chart(fig, use_container_width=True)
 
