@@ -8,6 +8,25 @@ from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="全球市場行情儀表板", layout="centered", page_icon="📈")
 
+# 自訂 CSS：縮小 st.metric 數值字體大小
+st.markdown("""
+<style>
+/* 縮小卡片主要數值文字 (預設約 2.25rem，縮小為 1.35rem) */
+div[data-testid="stMetricValue"] > div {
+    font-size: 1.35rem !important;
+    font-weight: 600;
+}
+/* 調整標籤字體大小 */
+div[data-testid="stMetricLabel"] > div {
+    font-size: 0.9rem !important;
+}
+/* 調整升跌文字大小 */
+div[data-testid="stMetricDelta"] > div {
+    font-size: 0.85rem !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("📈 全球市場行情與技術分析")
 
 # 頂部更新控制列
@@ -52,12 +71,21 @@ def render_simple_chart(ticker_symbol: str, label_name: str, period_key: str, li
         price = t.fast_info.last_price
         prev = t.fast_info.previous_close
         curr = t.fast_info.currency or ""
-        delta_pct = ((price - prev) / prev) * 100
+        delta_val = price - prev
+        delta_pct = (delta_val / prev) * 100
+
+        # 在百分比旁同時顯示具體升跌數值
+        if "=X" in ticker_symbol:
+            delta_str = f"{delta_val:+.4f} ({delta_pct:+.2f}%)"
+            val_str = f"{price:.4f} {curr}"
+        else:
+            delta_str = f"{delta_val:+.2f} ({delta_pct:+.2f}%)"
+            val_str = f"{price:.2f} {curr}"
 
         st.metric(
             label=f"{label_name} 最新報價",
-            value=f"{price:.4f} {curr}" if "=X" in ticker_symbol else f"{price:.2f} {curr}",
-            delta=f"{delta_pct:+.2f}%"
+            value=val_str,
+            delta=delta_str
         )
 
         hist = t.history(period=PERIOD_MAP[period_key])
@@ -108,8 +136,9 @@ with tab_fx:
         try:
             p = yf.Ticker(sym).fast_info.last_price
             prev_p = yf.Ticker(sym).fast_info.previous_close
-            d_pct = ((p - prev_p) / prev_p) * 100
-            col.metric(label=name, value=f"{p:.4f}", delta=f"{d_pct:+.2f}%")
+            d_val = p - prev_p
+            d_pct = (d_val / prev_p) * 100
+            col.metric(label=name, value=f"{p:.4f}", delta=f"{d_val:+.4f} ({d_pct:+.2f}%)")
         except Exception:
             col.metric(label=name, value="--")
 
@@ -177,7 +206,7 @@ with tab_us:
     render_simple_chart(US_WATCHLIST[selected_us], selected_us, us_range, line_color="#619CFF")
 
 # ==========================================
-# 分頁 5：獨立技術分析 (顯示完整名稱 / 成交量 / RSI / 保力加通道)
+# 分頁 5：獨立技術分析 (縮小數字、並排升跌數值與百分比)
 # ==========================================
 with tab_tech:
     st.caption("輸入任意股票代號，自動繪製 14 天 RSI 與保力加通道 (Bollinger Bands)")
@@ -209,7 +238,6 @@ with tab_tech:
             if hist.empty:
                 st.warning(f"查無標的 `{search_symbol}`，請確認代號格式是否正確。")
             else:
-                # 取得股票完整公司名稱 (優先取 longName，次取 shortName)
                 company_name = search_symbol
                 try:
                     info_dict = stock.info
@@ -217,7 +245,6 @@ with tab_tech:
                 except Exception:
                     company_name = search_symbol
 
-                # 顯示公司完整全名標題
                 st.subheader(f"🏢 {company_name} ({search_symbol})")
 
                 # 1. 保力加通道 (20MA, 2倍標準差)
@@ -243,15 +270,19 @@ with tab_tech:
                 rsi = last_row["RSI14"]
                 bb_mid = last_row["MA20"]
                 curr = stock.fast_info.currency or ""
-                delta_pct = ((price - prev_close) / prev_close) * 100
+                
+                # 計算具體升跌數值與百分比
+                delta_val = price - prev_close
+                delta_pct = (delta_val / prev_close) * 100
+                delta_display = f"{delta_val:+.2f} ({delta_pct:+.2f}%)"
 
-                # 頂部四格指標卡片
+                # 頂部四格指標卡片 (已透過 CSS 縮小主數字)
                 c1, c2, c3, c4 = st.columns(4)
-                c1.metric("當前最新價", f"{price:.2f} {curr}", f"{delta_pct:+.2f}%")
+                c1.metric("當前最新價", f"{price:.2f} {curr}", delta_display)
                 c2.metric("最新成交量", f"{volume:,.0f}")
                 rsi_status = " (超買)" if rsi >= 70 else (" (超賣)" if rsi <= 30 else " (中性)")
                 c3.metric("14天 RSI", f"{rsi:.1f}{rsi_status}")
-                c4.metric("保力加中軌(20MA)", f"{bb_mid:.2f}")
+                c4.metric("保力加中軌(20MA)", f"{bb_mid:.2f} {curr}")
 
                 # 繪製技術分析雙圖
                 fig = make_subplots(
