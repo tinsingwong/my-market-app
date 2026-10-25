@@ -177,7 +177,7 @@ with tab_us:
     render_simple_chart(US_WATCHLIST[selected_us], selected_us, us_range, line_color="#619CFF")
 
 # ==========================================
-# 分頁 5：獨立技術分析 (搜尋 / 成交量 / RSI / 保力加通道)
+# 分頁 5：獨立技術分析 (顯示完整名稱 / 成交量 / RSI / 保力加通道)
 # ==========================================
 with tab_tech:
     st.caption("輸入任意股票代號，自動繪製 14 天 RSI 與保力加通道 (Bollinger Bands)")
@@ -209,6 +209,17 @@ with tab_tech:
             if hist.empty:
                 st.warning(f"查無標的 `{search_symbol}`，請確認代號格式是否正確。")
             else:
+                # 取得股票完整公司名稱 (優先取 longName，次取 shortName)
+                company_name = search_symbol
+                try:
+                    info_dict = stock.info
+                    company_name = info_dict.get("longName") or info_dict.get("shortName") or search_symbol
+                except Exception:
+                    company_name = search_symbol
+
+                # 顯示公司完整全名標題
+                st.subheader(f"🏢 {company_name} ({search_symbol})")
+
                 # 1. 保力加通道 (20MA, 2倍標準差)
                 hist["MA20"] = hist["Close"].rolling(window=20).mean()
                 hist["STD20"] = hist["Close"].rolling(window=20).std()
@@ -248,7 +259,7 @@ with tab_tech:
                     shared_xaxes=True, 
                     vertical_spacing=0.08,
                     row_heights=[0.7, 0.3],
-                    subplot_titles=(f"{search_symbol} 價格走勢與保力加通道 (Bollinger Bands)", "14 天相對強弱指標 (RSI)")
+                    subplot_titles=(f"{company_name} 價格走勢與保力加通道 (Bollinger Bands)", "14 天相對強弱指標 (RSI)")
                 )
 
                 # 保力加通道
