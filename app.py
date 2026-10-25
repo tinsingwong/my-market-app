@@ -2,20 +2,43 @@ import streamlit as st
 import yfinance as yf
 import plotly.graph_objects as go
 from datetime import datetime
+from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="全球市場行情儀表板", layout="centered", page_icon="📈")
 
 st.title("📈 全球市場行情儀表板")
 
-# 頂部更新狀態列
-col_btn, col_time = st.columns([1, 2])
-with col_btn:
-    if st.button("🔄 刷新最新報價"):
-        st.rerun()
-with col_time:
-    st.caption(f"最後更新時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+# ==========================================
+# 頂部控制列：手動刷新 + 自動定時刷新選單
+# ==========================================
+col_refresh_btn, col_interval, col_status = st.columns([1, 1.3, 2])
 
-# 關鍵：建立四個獨立分頁標籤
+with col_refresh_btn:
+    if st.button("🔄 手動刷新"):
+        st.rerun()
+
+with col_interval:
+    refresh_option = st.selectbox(
+        "自動刷新頻率：",
+        ["關閉", "30 秒", "1 分鐘", "5 分鐘"],
+        index=1,  # 預設選中 30 秒
+        label_visibility="collapsed"
+    )
+
+# 依使用者選取的頻率啟動後台定時器 (毫秒計算法)
+if refresh_option == "30 秒":
+    st_autorefresh(interval=30 * 1000, key="auto_refresh_timer")
+elif refresh_option == "1 分鐘":
+    st_autorefresh(interval=60 * 1000, key="auto_refresh_timer")
+elif refresh_option == "5 分鐘":
+    st_autorefresh(interval=300 * 1000, key="auto_refresh_timer")
+
+with col_status:
+    st.caption(f"最後更新：`{datetime.now().strftime('%H:%M:%S')}` (自動頻率: {refresh_option})")
+
+# ==========================================
+# 四大獨立分類分頁
+# ==========================================
 tab_fx, tab_hk, tab_ca, tab_us = st.tabs([
     "💱 外匯匯率", 
     "🇭🇰 香港股市", 
@@ -60,7 +83,7 @@ def render_chart(ticker_symbol: str, label_name: str, period_key: str, line_colo
         st.error(f"取得報價失敗：{e}")
 
 # ==========================================
-# 分頁 1：外匯匯率（已擴充更多幣別）
+# 分頁 1：外匯匯率
 # ==========================================
 with tab_fx:
     st.caption("全球即時匯率換算與歷史走勢")
