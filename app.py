@@ -8,11 +8,11 @@ from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="全球市場行情儀表板", layout="centered", page_icon="📈")
 
-# 自訂 CSS：縮小頂部指標數值字體
+# 自訂 CSS：縮小頂部指標數值字體，保持畫面整齊
 st.markdown("""
 <style>
 div[data-testid="stMetricValue"] > div {
-    font-size: 1.35rem !important;
+    font-size: 1.30rem !important;
     font-weight: 600;
 }
 div[data-testid="stMetricLabel"] > div {
@@ -57,7 +57,7 @@ tab_fx, tab_hk, tab_ca, tab_us, tab_tech = st.tabs([
     "🇭🇰 香港股市", 
     "🇨🇦 加拿大股市", 
     "🇺🇸 美國股市",
-    "🔍 技術分析 (陰陽燭/成交量/RSI)"
+    "🔍 技術分析 (陰陽燭/成交量/RSI/股息)"
 ])
 
 PERIOD_MAP = {"1個月": "1mo", "6個月": "6mo", "1年": "1y", "5年": "5y"}
@@ -272,17 +272,17 @@ with tab_us:
     render_simple_chart(US_WATCHLIST[selected_us], selected_us, us_range, line_color="#619CFF")
 
 # ==========================================
-# 分頁 5：陰陽燭 + 買賣成交量 (綠買紅沽) + 保力加通道 + RSI
+# 分頁 5：搜尋頁面 (價格、指標、股息資訊與陰陽燭圖)
 # ==========================================
 with tab_tech:
-    st.caption("輸入任意股票代號，查看陰陽燭 K 線、買沽成交量、保力加通道與 14 天 RSI")
+    st.caption("輸入任意股票代號，查詢即時股價、股息派息日、陰陽燭、買沽成交量、保力加通道與 RSI")
 
     search_col1, search_col2 = st.columns([3, 1])
     with search_col1:
         raw_input = st.text_input(
             "輸入股票代號：",
-            value="0700.HK",
-            placeholder="美股直接輸入(如 NVDA, AAPL)；港股直接輸號碼(如 700 或 0700.HK)；加股加 .TO",
+            value="0005.HK",
+            placeholder="美股直接輸入(如 NVDA, AAPL)；港股直接輸號碼(如 5 或 0005.HK)；加股加 .TO",
             key="tech_search_input"
         ).strip().upper()
 
@@ -309,8 +309,9 @@ with tab_tech:
                 st.warning(f"查無標的 `{search_symbol}`，請確認代號格式是否正確。")
             else:
                 eng_name = search_symbol
+                info_dict = {}
                 try:
-                    info_dict = stock.info
+                    info_dict = stock.info or {}
                     eng_name = info_dict.get("longName") or info_dict.get("shortName") or search_symbol
                 except Exception:
                     eng_name = search_symbol
@@ -320,6 +321,43 @@ with tab_tech:
 
                 st.subheader(f"🏢 {display_title}")
 
+                # ----------------- 股息與派息資訊提取 -----------------
+                div_rate = info_dict.get("dividendRate") or info_dict.get("trailingAnnualDividendRate")
+                div_yield = info_dict.get("dividendYield") or info_dict.get("trailingAnnualDividendYield")
+                ex_div_timestamp = info_dict.get("exDividendDate")
+                payout_timestamp = info_dict.get("dividendDate")
+
+                # 股息金額顯示
+                curr = stock.fast_info.currency or ""
+                div_rate_str = f"{div_rate:.2f} {curr}" if div_rate is not None else "無派息 / --"
+
+                # 股息率百分比顯示
+                if div_yield is not None:
+                    # yfinance 有時回傳 0.045 有時回傳 4.5，小於 1 則乘 100
+                    div_yield_pct = div_yield * 100 if div_yield < 1 else div_yield
+                    div_yield_str = f"{div_yield_pct:.2f}%"
+                else:
+                    div_yield_str = "--"
+
+                # 除淨日轉換
+                if ex_div_timestamp:
+                    try:
+                        ex_div_str = datetime.fromtimestamp(ex_div_timestamp).strftime('%Y-%m-%d')
+                    except Exception:
+                        ex_div_str = "--"
+                else:
+                    ex_div_str = "--"
+
+                # 派息日轉換
+                if payout_timestamp:
+                    try:
+                        payout_str = datetime.fromtimestamp(payout_timestamp).strftime('%Y-%m-%d')
+                    except Exception:
+                        payout_str = "--"
+                else:
+                    payout_str = "--"
+
+                # ----------------- 技術指標計算 -----------------
                 # 1. 保力加通道 (20MA, 2倍標準差)
                 hist["MA20"] = hist["Close"].rolling(window=20).mean()
                 hist["STD20"] = hist["Close"].rolling(window=20).std()
@@ -335,7 +373,7 @@ with tab_tech:
                 rs = avg_gain / avg_loss
                 hist["RSI14"] = 100 - (100 / (1 + rs))
 
-                # 3. 判斷每日買盤 / 沽盤顏色 (收盤 >= 開盤 為綠色買盤，反之為紅色沽盤)
+                # 3. 買賣盤顏色判斷
                 colors_volume = [
                     "#26a69a" if close_val >= open_val else "#ef5350"
                     for open_val, close_val in zip(hist["Open"], hist["Close"])
@@ -348,13 +386,12 @@ with tab_tech:
                 volume = int(last_row["Volume"])
                 rsi = last_row["RSI14"]
                 bb_mid = last_row["MA20"]
-                curr = stock.fast_info.currency or ""
                 
                 delta_val = price - prev_close
                 delta_pct = (delta_val / prev_close) * 100
                 delta_display = f"{delta_val:+.2f} ({delta_pct:+.2f}%)"
 
-                # 頂部四格數據卡片
+                # 第一排：股價與技術指標卡片
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("當前最新價", f"{price:.2f} {curr}", delta_display)
                 c2.metric("最新成交量", f"{volume:,.0f}")
@@ -362,7 +399,14 @@ with tab_tech:
                 c3.metric("14天 RSI", f"{rsi:.1f}{rsi_status}")
                 c4.metric("保力加中軌(20MA)", f"{bb_mid:.2f} {curr}")
 
-                # 建立三層子圖 (主圖 60% 高度, 成交量 20%, RSI 20%)
+                # 第二排：股息與派息資訊卡片
+                d1, d2, d3, d4 = st.columns(4)
+                d1.metric("每股股息 (年化)", div_rate_str)
+                d2.metric("股息率 (息率)", div_yield_str)
+                d3.metric("除淨日 (Ex-Date)", ex_div_str)
+                d4.metric("派息日 (Pay Date)", payout_str)
+
+                # 繪製三層子圖
                 fig = make_subplots(
                     rows=3, cols=1, 
                     shared_xaxes=True, 
@@ -383,8 +427,8 @@ with tab_tech:
                     low=hist["Low"],
                     close=hist["Close"],
                     name="陰陽燭",
-                    increasing_line_color="#26a69a",  # 陽燭綠色
-                    decreasing_line_color="#ef5350"  # 陰燭紅色
+                    increasing_line_color="#26a69a",
+                    decreasing_line_color="#ef5350"
                 ), row=1, col=1)
 
                 fig.add_trace(go.Scatter(
@@ -407,7 +451,7 @@ with tab_tech:
                     name="20日均線"
                 ), row=1, col=1)
 
-                # --- 第 2 層：成交量直方圖 (綠買紅沽) ---
+                # --- 第 2 層：成交量直方圖 ---
                 fig.add_trace(go.Bar(
                     x=hist.index,
                     y=hist["Volume"],
@@ -422,10 +466,9 @@ with tab_tech:
                     name="RSI 14"
                 ), row=3, col=1)
 
-                fig.add_hline(y=70, line_dash="dot", line_color="red", row=3, col=1)
-                fig.add_hline(y=30, line_dash="dot", line_color="green", row=3, col=1)
+                fig.add_hline(y=70, line_dash="dot", line_color="red", row=2, col=1)
+                fig.add_hline(y=30, line_dash="dot", line_color="green", row=2, col=1)
 
-                # 關閉預設的下方 range slider，保持版面緊湊
                 fig.update_layout(
                     xaxis_rangeslider_visible=False,
                     margin=dict(l=10, r=10, t=30, b=10),
