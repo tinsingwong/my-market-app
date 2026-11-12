@@ -6,10 +6,10 @@ import pandas as pd
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# 1. 改為 layout="wide" 讓整個網頁與圖表闊度拉滿寬螢幕
+# 寬螢幕全幅模式
 st.set_page_config(page_title="全球市場行情儀表板", layout="wide", page_icon="📈")
 
-# 自訂 CSS：縮小指標數值字體，讓排版緊湊
+# 自訂 CSS：縮小指標數值字體，保持版面整齊
 st.markdown("""
 <style>
 div[data-testid="stMetricValue"] > div {
@@ -136,132 +136,6 @@ CHINESE_NAME_MAP = {
 def render_simple_chart(ticker_symbol: str, label_name: str, period_key: str, line_color: str = "#29b5e8"):
     try:
         t = yf.Ticker(ticker_symbol)
-        price = t.fast_info.last_price
-        prev = t.fast_info.previous_close
-        curr = t.fast_info.currency or ""
-        delta_val = price - prev
-        delta_pct = (delta_val / prev) * 100
-
-        if "=X" in ticker_symbol:
-            delta_str = f"{delta_val:+.4f} ({delta_pct:+.2f}%)"
-            val_str = f"{price:.4f} {curr}"
-        else:
-            delta_str = f"{delta_val:+.2f} ({delta_pct:+.2f}%)"
-            val_str = f"{price:.2f} {curr}"
-
-        st.metric(
-            label=f"{label_name} 最新報價",
-            value=val_str,
-            delta=delta_str
-        )
-
-        hist = t.history(period=PERIOD_MAP[period_key])
-        if not hist.empty:
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=hist.index, 
-                y=hist["Close"], 
-                mode="lines",
-                name="收盤價",
-                line=dict(color=line_color, width=2)
-            ))
-            fig.update_layout(
-                margin=dict(l=10, r=10, t=20, b=10),
-                height=360,
-                xaxis_title="日期",
-                yaxis_title=f"價格 ({curr})"
-            )
-            st.plotly_chart(fig, use_container_width=True)
-    except Exception as e:
-        st.error(f"取得報價失敗：{e}")
-
-# ==========================================
-# 分頁 1：外匯 (雙下拉選單 + 一鍵互換)
-# ==========================================
-with tab_fx:
-    st.caption("自選基準貨幣與目標貨幣，即時查詢匯率換算與歷史走勢")
-
-    col1, col2, col3, col4 = st.columns(4)
-    quick_fx = [
-        ("加幣/港幣", "CADHKD=X", col1),
-        ("美元/加幣", "USDCAD=X", col2),
-        ("美元/港幣", "USDHKD=X", col3),
-        ("日圓/港幣", "JPYHKD=X", col4),
-    ]
-    for name, sym, col in quick_fx:
-        try:
-            p = yf.Ticker(sym).fast_info.last_price
-            prev_p = yf.Ticker(sym).fast_info.previous_close
-            d_val = p - prev_p
-            d_pct = (d_val / prev_p) * 100
-            col.metric(label=name, value=f"{p:.4f}", delta=f"{d_val:+.4f} ({d_pct:+.2f}%)")
-        except Exception:
-            col.metric(label=name, value="--")
-
-    st.markdown("---")
-
- CURRENCIES = {
-        "加幣 (CAD)": "CAD",
-        "港幣 (HKD)": "HKD",
-        "美元 (USD)": "USD",
-        "英鎊 (GBP)": "GBP",
-        "日圓 (JPY)": "JPY",
-        "歐元 (EUR)": "EUR",
-        "澳幣 (AUD)": "AUD",
-        "人民幣 (CNY)": "CNY",   # <- 改為 CNY，確保圖表歷史數據最完整
-        "瑞士法郎 (CHF)": "CHF",
-        "新台幣 (TWD)": "TWD",
-        "新加坡幣 (SGD)": "SGD"
-    }
-    currency_labels = list(CURRENCIES.keys())
-
-    # 1. 直接初始化兩個下拉選單綁定的 key (預設 CAD 兌 HKD)
-    if "fx_base_select" not in st.session_state:
-        st.session_state["fx_base_select"] = "加幣 (CAD)"
-    if "fx_target_select" not in st.session_state:
-        st.session_state["fx_target_select"] = "港幣 (HKD)"
-
-    # 2. 互換函數：直接將兩個下拉選單綁定的 key 值對調
-    def swap_currencies():
-        temp = st.session_state["fx_base_select"]
-        st.session_state["fx_base_select"] = st.session_state["fx_target_select"]
-        st.session_state["fx_target_select"] = temp
-
-    st.write("### 💱 自選貨幣對換")
-    fx_col1, fx_btn_col, fx_col2 = st.columns([4, 1, 4])
-
-    # 3. 注意：直接交由 key 管理狀態，不傳入 index 參數避免衝突
-    with fx_col1:
-        base_name = st.selectbox(
-            "1. 基準貨幣（From）：",
-            currency_labels,
-            key="fx_base_select"
-        )
-
-    with fx_btn_col:
-        st.write("")
-        st.write("")
-        st.button("⇄ 互換", on_click=swap_currencies, use_container_width=True)
-
-    with fx_col2:
-        target_name = st.selectbox(
-            "2. 目標貨幣（To）：",
-            currency_labels,
-            key="fx_target_select"
-        )
-
-    base_code = CURRENCIES[base_name]
-    target_code = CURRENCIES[target_name]
-
-    if base_code == target_code:
-        st.warning("基準貨幣與目標貨幣相同，匯率固定為 1.0000。請選擇不同的貨幣進行換算。")
-    else:
-        pair_symbol = f"{base_code}{target_code}=X"
-        pair_display = f"{base_name} 兌 {target_name} ({base_code}/{target_code})"
-        fx_range = st.radio("時間週期：", list(PERIOD_MAP.keys()), horizontal=True, key="fx_range")
-        def render_simple_chart(ticker_symbol: str, label_name: str, period_key: str, line_color: str = "#29b5e8"):
-    try:
-        t = yf.Ticker(ticker_symbol)
         hist = t.history(period=PERIOD_MAP[period_key])
 
         # 若為外匯且直接代碼抓不到歷史圖表 (例如某些反向貨幣對)，自動透過 USD 交叉計算
@@ -269,7 +143,6 @@ with tab_fx:
             base_c = ticker_symbol[:3]
             target_c = ticker_symbol[3:6]
             
-            # 取得對美元的歷史匯率
             h_base = pd.Series(1.0, index=yf.Ticker("USDCAD=X").history(period=PERIOD_MAP[period_key]).index) if base_c == "USD" else yf.Ticker(f"USD{base_c}=X").history(period=PERIOD_MAP[period_key])["Close"]
             h_target = pd.Series(1.0, index=yf.Ticker("USDCAD=X").history(period=PERIOD_MAP[period_key]).index) if target_c == "USD" else yf.Ticker(f"USD{target_c}=X").history(period=PERIOD_MAP[period_key])["Close"]
             
@@ -282,7 +155,6 @@ with tab_fx:
             st.warning(f"暫無 `{ticker_symbol}` 的歷史走勢數據。")
             return
 
-        # 從歷史數據的最後兩筆取得最新價與前收價，確保數字與圖表 100% 同步
         price = float(hist["Close"].iloc[-1])
         prev = float(hist["Close"].iloc[-2]) if len(hist) > 1 else price
         curr = "" if "=X" in ticker_symbol else (t.fast_info.currency or "")
@@ -321,6 +193,89 @@ with tab_fx:
 
     except Exception as e:
         st.error(f"取得報價失敗：{e}")
+
+# ==========================================
+# 分頁 1：外匯 (雙下拉選單 + 一鍵互換 + 人民幣支援)
+# ==========================================
+with tab_fx:
+    st.caption("自選基準貨幣與目標貨幣，即時查詢匯率換算與歷史走勢")
+
+    col1, col2, col3, col4 = st.columns(4)
+    quick_fx = [
+        ("加幣/港幣", "CADHKD=X", col1),
+        ("美元/加幣", "USDCAD=X", col2),
+        ("美元/港幣", "USDHKD=X", col3),
+        ("日圓/港幣", "JPYHKD=X", col4),
+    ]
+    for name, sym, col in quick_fx:
+        try:
+            p = yf.Ticker(sym).fast_info.last_price
+            prev_p = yf.Ticker(sym).fast_info.previous_close
+            d_val = p - prev_p
+            d_pct = (d_val / prev_p) * 100
+            col.metric(label=name, value=f"{p:.4f}", delta=f"{d_val:+.4f} ({d_pct:+.2f}%)")
+        except Exception:
+            col.metric(label=name, value="--")
+
+    st.markdown("---")
+
+    CURRENCIES = {
+        "加幣 (CAD)": "CAD",
+        "港幣 (HKD)": "HKD",
+        "美元 (USD)": "USD",
+        "英鎊 (GBP)": "GBP",
+        "日圓 (JPY)": "JPY",
+        "歐元 (EUR)": "EUR",
+        "澳幣 (AUD)": "AUD",
+        "人民幣 (CNY)": "CNY",
+        "瑞士法郎 (CHF)": "CHF",
+        "新台幣 (TWD)": "TWD",
+        "新加坡幣 (SGD)": "SGD"
+    }
+    currency_labels = list(CURRENCIES.keys())
+
+    if "fx_base_select" not in st.session_state:
+        st.session_state["fx_base_select"] = "加幣 (CAD)"
+    if "fx_target_select" not in st.session_state:
+        st.session_state["fx_target_select"] = "港幣 (HKD)"
+
+    def swap_currencies():
+        temp = st.session_state["fx_base_select"]
+        st.session_state["fx_base_select"] = st.session_state["fx_target_select"]
+        st.session_state["fx_target_select"] = temp
+
+    st.write("### 💱 自選貨幣對換")
+    fx_col1, fx_btn_col, fx_col2 = st.columns([4, 1, 4])
+
+    with fx_col1:
+        base_name = st.selectbox(
+            "1. 基準貨幣（From）：",
+            currency_labels,
+            key="fx_base_select"
+        )
+
+    with fx_btn_col:
+        st.write("")
+        st.write("")
+        st.button("⇄ 互換", on_click=swap_currencies, use_container_width=True)
+
+    with fx_col2:
+        target_name = st.selectbox(
+            "2. 目標貨幣（To）：",
+            currency_labels,
+            key="fx_target_select"
+        )
+
+    base_code = CURRENCIES[base_name]
+    target_code = CURRENCIES[target_name]
+
+    if base_code == target_code:
+        st.warning("基準貨幣與目標貨幣相同，匯率固定為 1.0000。請選擇不同的貨幣進行換算。")
+    else:
+        pair_symbol = f"{base_code}{target_code}=X"
+        pair_display = f"{base_name} 兌 {target_name} ({base_code}/{target_code})"
+        fx_range = st.radio("時間週期：", list(PERIOD_MAP.keys()), horizontal=True, key="fx_range")
+        render_simple_chart(pair_symbol, pair_display, fx_range, line_color="#00BA38")
 
 # ==========================================
 # 分頁 2：港股
@@ -381,7 +336,7 @@ with tab_us:
     render_simple_chart(US_WATCHLIST[selected_us], selected_us, us_range, line_color="#619CFF")
 
 # ==========================================
-# 分頁 5：技術分析 (修正精準股息率 + 寬螢幕無重疊圖表)
+# 分頁 5：技術分析 (陰陽燭 / 成交量 / RSI / 股息)
 # ==========================================
 with tab_tech:
     st.caption("輸入任意股票代號，查詢即時股價、股息派息日、陰陽燭、買沽成交量、保力加通道與 RSI")
@@ -430,12 +385,13 @@ with tab_tech:
 
                 st.subheader(f"🏢 {display_title}")
 
-                # ----------------- 技術指標與基本價格計算 -----------------
+                # 1. 保力加通道 (20MA, 2倍標準差)
                 hist["MA20"] = hist["Close"].rolling(window=20).mean()
                 hist["STD20"] = hist["Close"].rolling(window=20).std()
                 hist["BB_Upper"] = hist["MA20"] + (hist["STD20"] * 2)
                 hist["BB_Lower"] = hist["MA20"] - (hist["STD20"] * 2)
 
+                # 2. 14天 RSI (Wilder 平滑)
                 delta = hist["Close"].diff()
                 gain = delta.clip(lower=0)
                 loss = -1 * delta.clip(upper=0)
@@ -462,14 +418,13 @@ with tab_tech:
                 delta_pct = (delta_val / prev_close) * 100
                 delta_display = f"{delta_val:+.2f} ({delta_pct:+.2f}%)"
 
-                # ----------------- 精確股息與息率計算 -----------------
+                # 精確股息與息率計算
                 div_rate = info_dict.get("dividendRate") or info_dict.get("trailingAnnualDividendRate")
                 ex_div_timestamp = info_dict.get("exDividendDate")
                 payout_timestamp = info_dict.get("dividendDate")
 
                 if div_rate is not None and div_rate > 0:
                     div_rate_str = f"{div_rate:.2f} {curr}"
-                    # 直接以 (年化股息 / 當前最新股價) * 100 精確算出真實息率，避免資料庫小數點誤差
                     real_yield = (div_rate / price) * 100
                     div_yield_str = f"{real_yield:.2f}%"
                 else:
@@ -494,7 +449,7 @@ with tab_tech:
                 d3.metric("除淨日 (Ex-Date)", ex_div_str)
                 d4.metric("派息日 (Pay Date)", payout_str)
 
-                st.write("")  # 增加圖表與數據卡片的間距
+                st.write("")
 
                 # 繪製三層寬螢幕子圖
                 fig = make_subplots(
@@ -509,7 +464,6 @@ with tab_tech:
                     )
                 )
 
-                # --- 第 1 層：陰陽燭 + 保力加通道 ---
                 fig.add_trace(go.Candlestick(
                     x=hist.index,
                     open=hist["Open"],
@@ -541,7 +495,6 @@ with tab_tech:
                     name="20日均線"
                 ), row=1, col=1)
 
-                # --- 第 2 層：成交量直方圖 ---
                 fig.add_trace(go.Bar(
                     x=hist.index,
                     y=hist["Volume"],
@@ -549,7 +502,6 @@ with tab_tech:
                     name="成交量"
                 ), row=2, col=1)
 
-                # --- 第 3 層：14 天 RSI ---
                 fig.add_trace(go.Scatter(
                     x=hist.index, y=hist["RSI14"],
                     line=dict(color="#ab63fa", width=2),
@@ -559,7 +511,6 @@ with tab_tech:
                 fig.add_hline(y=70, line_dash="dot", line_color="red", row=3, col=1)
                 fig.add_hline(y=30, line_dash="dot", line_color="green", row=3, col=1)
 
-                # 將圖例置於最頂端上方，並留足邊距避免任何文字重疊
                 fig.update_layout(
                     xaxis_rangeslider_visible=False,
                     margin=dict(l=10, r=10, t=65, b=10),
