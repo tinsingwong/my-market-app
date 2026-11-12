@@ -200,7 +200,7 @@ with tab_fx:
 
     st.markdown("---")
 
-    CURRENCIES = {
+ CURRENCIES = {
         "加幣 (CAD)": "CAD",
         "港幣 (HKD)": "HKD",
         "美元 (USD)": "USD",
@@ -208,7 +208,7 @@ with tab_fx:
         "日圓 (JPY)": "JPY",
         "歐元 (EUR)": "EUR",
         "澳幣 (AUD)": "AUD",
-        "離岸人民幣 (CNH)": "CNH",
+        "人民幣 (CNY)": "CNY",   # <- 改為 CNY，確保圖表歷史數據最完整
         "瑞士法郎 (CHF)": "CHF",
         "新台幣 (TWD)": "TWD",
         "新加坡幣 (SGD)": "SGD"
@@ -259,7 +259,68 @@ with tab_fx:
         pair_symbol = f"{base_code}{target_code}=X"
         pair_display = f"{base_name} 兌 {target_name} ({base_code}/{target_code})"
         fx_range = st.radio("時間週期：", list(PERIOD_MAP.keys()), horizontal=True, key="fx_range")
-        render_simple_chart(pair_symbol, pair_display, fx_range, line_color="#00BA38")
+        def render_simple_chart(ticker_symbol: str, label_name: str, period_key: str, line_color: str = "#29b5e8"):
+    try:
+        t = yf.Ticker(ticker_symbol)
+        hist = t.history(period=PERIOD_MAP[period_key])
+
+        # 若為外匯且直接代碼抓不到歷史圖表 (例如某些反向貨幣對)，自動透過 USD 交叉計算
+        if hist.empty and ticker_symbol.endswith("=X") and len(ticker_symbol) == 8:
+            base_c = ticker_symbol[:3]
+            target_c = ticker_symbol[3:6]
+            
+            # 取得對美元的歷史匯率
+            h_base = pd.Series(1.0, index=yf.Ticker("USDCAD=X").history(period=PERIOD_MAP[period_key]).index) if base_c == "USD" else yf.Ticker(f"USD{base_c}=X").history(period=PERIOD_MAP[period_key])["Close"]
+            h_target = pd.Series(1.0, index=yf.Ticker("USDCAD=X").history(period=PERIOD_MAP[period_key]).index) if target_c == "USD" else yf.Ticker(f"USD{target_c}=X").history(period=PERIOD_MAP[period_key])["Close"]
+            
+            df_cross = pd.DataFrame({"base": h_base, "target": h_target}).dropna()
+            if not df_cross.empty:
+                cross_close = df_cross["target"] / df_cross["base"]
+                hist = pd.DataFrame({"Close": cross_close})
+
+        if hist.empty:
+            st.warning(f"暫無 `{ticker_symbol}` 的歷史走勢數據。")
+            return
+
+        # 從歷史數據的最後兩筆取得最新價與前收價，確保數字與圖表 100% 同步
+        price = float(hist["Close"].iloc[-1])
+        prev = float(hist["Close"].iloc[-2]) if len(hist) > 1 else price
+        curr = "" if "=X" in ticker_symbol else (t.fast_info.currency or "")
+        
+        delta_val = price - prev
+        delta_pct = (delta_val / prev) * 100
+
+        if "=X" in ticker_symbol:
+            delta_str = f"{delta_val:+.4f} ({delta_pct:+.2f}%)"
+            val_str = f"{price:.4f}"
+        else:
+            delta_str = f"{delta_val:+.2f} ({delta_pct:+.2f}%)"
+            val_str = f"{price:.2f} {curr}"
+
+        st.metric(
+            label=f"{label_name} 最新報價",
+            value=val_str,
+            delta=delta_str
+        )
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=hist.index, 
+            y=hist["Close"], 
+            mode="lines",
+            name="收盤價",
+            line=dict(color=line_color, width=2)
+        ))
+        fig.update_layout(
+            margin=dict(l=10, r=10, t=20, b=10),
+            height=360,
+            xaxis_title="日期",
+            yaxis_title=f"匯率 / 價格 ({curr})" if curr else "匯率"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"取得報價失敗：{e}")
 
 # ==========================================
 # 分頁 2：港股
