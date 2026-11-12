@@ -215,23 +215,28 @@ with tab_fx:
     }
     currency_labels = list(CURRENCIES.keys())
 
-    if "fx_base_label" not in st.session_state:
-        st.session_state["fx_base_label"] = "加幣 (CAD)"
-    if "fx_target_label" not in st.session_state:
-        st.session_state["fx_target_label"] = "港幣 (HKD)"
+    # 1. 直接初始化兩個下拉選單綁定的 key (預設 CAD 兌 HKD)
+    if "fx_base_select" not in st.session_state:
+        st.session_state["fx_base_select"] = "加幣 (CAD)"
+    if "fx_target_select" not in st.session_state:
+        st.session_state["fx_target_select"] = "港幣 (HKD)"
 
+    # 2. 互換函數：直接將兩個下拉選單綁定的 key 值對調
     def swap_currencies():
-        old_base = st.session_state["fx_base_label"]
-        st.session_state["fx_base_label"] = st.session_state["fx_target_label"]
-        st.session_state["fx_target_label"] = old_base
+        temp = st.session_state["fx_base_select"]
+        st.session_state["fx_base_select"] = st.session_state["fx_target_select"]
+        st.session_state["fx_target_select"] = temp
 
     st.write("### 💱 自選貨幣對換")
     fx_col1, fx_btn_col, fx_col2 = st.columns([4, 1, 4])
 
+    # 3. 注意：直接交由 key 管理狀態，不傳入 index 參數避免衝突
     with fx_col1:
-        base_idx = currency_labels.index(st.session_state["fx_base_label"])
-        base_name = st.selectbox("1. 基準貨幣（From）：", currency_labels, index=base_idx, key="fx_base_select")
-        st.session_state["fx_base_label"] = base_name
+        base_name = st.selectbox(
+            "1. 基準貨幣（From）：",
+            currency_labels,
+            key="fx_base_select"
+        )
 
     with fx_btn_col:
         st.write("")
@@ -239,18 +244,20 @@ with tab_fx:
         st.button("⇄ 互換", on_click=swap_currencies, use_container_width=True)
 
     with fx_col2:
-        target_idx = currency_labels.index(st.session_state["fx_target_label"])
-        target_name = st.selectbox("2. 目標貨幣（To）：", currency_labels, index=target_idx, key="fx_target_select")
-        st.session_state["fx_target_label"] = target_name
+        target_name = st.selectbox(
+            "2. 目標貨幣（To）：",
+            currency_labels,
+            key="fx_target_select"
+        )
 
-    base_code = CURRENCIES[st.session_state["fx_base_label"]]
-    target_code = CURRENCIES[st.session_state["fx_target_label"]]
+    base_code = CURRENCIES[base_name]
+    target_code = CURRENCIES[target_name]
 
     if base_code == target_code:
         st.warning("基準貨幣與目標貨幣相同，匯率固定為 1.0000。請選擇不同的貨幣進行換算。")
     else:
         pair_symbol = f"{base_code}{target_code}=X"
-        pair_display = f"{st.session_state['fx_base_label']} 兌 {st.session_state['fx_target_label']} ({base_code}/{target_code})"
+        pair_display = f"{base_name} 兌 {target_name} ({base_code}/{target_code})"
         fx_range = st.radio("時間週期：", list(PERIOD_MAP.keys()), horizontal=True, key="fx_range")
         render_simple_chart(pair_symbol, pair_display, fx_range, line_color="#00BA38")
 
