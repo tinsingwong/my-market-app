@@ -6,9 +6,10 @@ import pandas as pd
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-st.set_page_config(page_title="全球市場行情儀表板", layout="centered", page_icon="📈")
+# 1. 改為 layout="wide" 讓整個網頁與圖表闊度拉滿寬螢幕
+st.set_page_config(page_title="全球市場行情儀表板", layout="wide", page_icon="📈")
 
-# 自訂 CSS：縮小頂部指標數值字體，保持畫面整齊
+# 自訂 CSS：縮小指標數值字體，讓排版緊湊
 st.markdown("""
 <style>
 div[data-testid="stMetricValue"] > div {
@@ -27,7 +28,7 @@ div[data-testid="stMetricDelta"] > div {
 st.title("📈 全球市場行情與技術分析")
 
 # 頂部更新控制列
-col_btn, col_interval, col_status = st.columns([1, 1.3, 2])
+col_btn, col_interval, col_status = st.columns([1, 1.2, 4])
 
 with col_btn:
     if st.button("🔄 手動刷新"):
@@ -165,8 +166,8 @@ def render_simple_chart(ticker_symbol: str, label_name: str, period_key: str, li
                 line=dict(color=line_color, width=2)
             ))
             fig.update_layout(
-                margin=dict(l=10, r=10, t=10, b=10),
-                height=300,
+                margin=dict(l=10, r=10, t=20, b=10),
+                height=360,
                 xaxis_title="日期",
                 yaxis_title=f"價格 ({curr})"
             )
@@ -175,22 +176,11 @@ def render_simple_chart(ticker_symbol: str, label_name: str, period_key: str, li
         st.error(f"取得報價失敗：{e}")
 
 # ==========================================
-# 分頁 1：外匯
+# 分頁 1：外匯 (雙下拉選單 + 一鍵互換)
 # ==========================================
 with tab_fx:
-    st.caption("全球即時匯率換算與歷史走勢")
-    FX_WATCHLIST = {
-        "加幣 / 港幣 (CAD/HKD)": "CADHKD=X",
-        "美元 / 加幣 (USD/CAD)": "USDCAD=X",
-        "美元 / 港幣 (USD/HKD)": "USDHKD=X",
-        "英鎊 / 加幣 (GBP/CAD)": "GBPCAD=X",
-        "英鎊 / 美元 (GBP/USD)": "GBPUSD=X",
-        "歐元 / 加幣 (EUR/CAD)": "EURCAD=X",
-        "歐元 / 美元 (EUR/USD)": "EURUSD=X",
-        "日圓 / 港幣 (JPY/HKD)": "JPYHKD=X",
-        "澳幣 / 加幣 (AUD/CAD)": "AUDCAD=X",
-        "美元 / 人民幣 (USD/CNH)": "USDCNH=X",
-    }
+    st.caption("自選基準貨幣與目標貨幣，即時查詢匯率換算與歷史走勢")
+
     col1, col2, col3, col4 = st.columns(4)
     quick_fx = [
         ("加幣/港幣", "CADHKD=X", col1),
@@ -209,9 +199,60 @@ with tab_fx:
             col.metric(label=name, value="--")
 
     st.markdown("---")
-    selected_fx = st.selectbox("選擇匯率：", list(FX_WATCHLIST.keys()), key="fx_select")
-    fx_range = st.radio("時間週期：", list(PERIOD_MAP.keys()), horizontal=True, key="fx_range")
-    render_simple_chart(FX_WATCHLIST[selected_fx], selected_fx, fx_range, line_color="#00BA38")
+
+    CURRENCIES = {
+        "加幣 (CAD)": "CAD",
+        "港幣 (HKD)": "HKD",
+        "美元 (USD)": "USD",
+        "英鎊 (GBP)": "GBP",
+        "日圓 (JPY)": "JPY",
+        "歐元 (EUR)": "EUR",
+        "澳幣 (AUD)": "AUD",
+        "離岸人民幣 (CNH)": "CNH",
+        "瑞士法郎 (CHF)": "CHF",
+        "新台幣 (TWD)": "TWD",
+        "新加坡幣 (SGD)": "SGD"
+    }
+    currency_labels = list(CURRENCIES.keys())
+
+    if "fx_base_label" not in st.session_state:
+        st.session_state["fx_base_label"] = "加幣 (CAD)"
+    if "fx_target_label" not in st.session_state:
+        st.session_state["fx_target_label"] = "港幣 (HKD)"
+
+    def swap_currencies():
+        old_base = st.session_state["fx_base_label"]
+        st.session_state["fx_base_label"] = st.session_state["fx_target_label"]
+        st.session_state["fx_target_label"] = old_base
+
+    st.write("### 💱 自選貨幣對換")
+    fx_col1, fx_btn_col, fx_col2 = st.columns([4, 1, 4])
+
+    with fx_col1:
+        base_idx = currency_labels.index(st.session_state["fx_base_label"])
+        base_name = st.selectbox("1. 基準貨幣（From）：", currency_labels, index=base_idx, key="fx_base_select")
+        st.session_state["fx_base_label"] = base_name
+
+    with fx_btn_col:
+        st.write("")
+        st.write("")
+        st.button("⇄ 互換", on_click=swap_currencies, use_container_width=True)
+
+    with fx_col2:
+        target_idx = currency_labels.index(st.session_state["fx_target_label"])
+        target_name = st.selectbox("2. 目標貨幣（To）：", currency_labels, index=target_idx, key="fx_target_select")
+        st.session_state["fx_target_label"] = target_name
+
+    base_code = CURRENCIES[st.session_state["fx_base_label"]]
+    target_code = CURRENCIES[st.session_state["fx_target_label"]]
+
+    if base_code == target_code:
+        st.warning("基準貨幣與目標貨幣相同，匯率固定為 1.0000。請選擇不同的貨幣進行換算。")
+    else:
+        pair_symbol = f"{base_code}{target_code}=X"
+        pair_display = f"{st.session_state['fx_base_label']} 兌 {st.session_state['fx_target_label']} ({base_code}/{target_code})"
+        fx_range = st.radio("時間週期：", list(PERIOD_MAP.keys()), horizontal=True, key="fx_range")
+        render_simple_chart(pair_symbol, pair_display, fx_range, line_color="#00BA38")
 
 # ==========================================
 # 分頁 2：港股
@@ -272,16 +313,16 @@ with tab_us:
     render_simple_chart(US_WATCHLIST[selected_us], selected_us, us_range, line_color="#619CFF")
 
 # ==========================================
-# 分頁 5：搜尋頁面 (價格、指標、股息資訊與陰陽燭圖)
+# 分頁 5：技術分析 (修正精準股息率 + 寬螢幕無重疊圖表)
 # ==========================================
 with tab_tech:
     st.caption("輸入任意股票代號，查詢即時股價、股息派息日、陰陽燭、買沽成交量、保力加通道與 RSI")
 
-    search_col1, search_col2 = st.columns([3, 1])
+    search_col1, search_col2 = st.columns([4, 1])
     with search_col1:
         raw_input = st.text_input(
             "輸入股票代號：",
-            value="0005.HK",
+            value="NVDA",
             placeholder="美股直接輸入(如 NVDA, AAPL)；港股直接輸號碼(如 5 或 0005.HK)；加股加 .TO",
             key="tech_search_input"
         ).strip().upper()
@@ -321,50 +362,12 @@ with tab_tech:
 
                 st.subheader(f"🏢 {display_title}")
 
-                # ----------------- 股息與派息資訊提取 -----------------
-                div_rate = info_dict.get("dividendRate") or info_dict.get("trailingAnnualDividendRate")
-                div_yield = info_dict.get("dividendYield") or info_dict.get("trailingAnnualDividendYield")
-                ex_div_timestamp = info_dict.get("exDividendDate")
-                payout_timestamp = info_dict.get("dividendDate")
-
-                # 股息金額顯示
-                curr = stock.fast_info.currency or ""
-                div_rate_str = f"{div_rate:.2f} {curr}" if div_rate is not None else "無派息 / --"
-
-                # 股息率百分比顯示
-                if div_yield is not None:
-                    # yfinance 有時回傳 0.045 有時回傳 4.5，小於 1 則乘 100
-                    div_yield_pct = div_yield * 100 if div_yield < 1 else div_yield
-                    div_yield_str = f"{div_yield_pct:.2f}%"
-                else:
-                    div_yield_str = "--"
-
-                # 除淨日轉換
-                if ex_div_timestamp:
-                    try:
-                        ex_div_str = datetime.fromtimestamp(ex_div_timestamp).strftime('%Y-%m-%d')
-                    except Exception:
-                        ex_div_str = "--"
-                else:
-                    ex_div_str = "--"
-
-                # 派息日轉換
-                if payout_timestamp:
-                    try:
-                        payout_str = datetime.fromtimestamp(payout_timestamp).strftime('%Y-%m-%d')
-                    except Exception:
-                        payout_str = "--"
-                else:
-                    payout_str = "--"
-
-                # ----------------- 技術指標計算 -----------------
-                # 1. 保力加通道 (20MA, 2倍標準差)
+                # ----------------- 技術指標與基本價格計算 -----------------
                 hist["MA20"] = hist["Close"].rolling(window=20).mean()
                 hist["STD20"] = hist["Close"].rolling(window=20).std()
                 hist["BB_Upper"] = hist["MA20"] + (hist["STD20"] * 2)
                 hist["BB_Lower"] = hist["MA20"] - (hist["STD20"] * 2)
 
-                # 2. 14天 RSI (Wilder 平滑)
                 delta = hist["Close"].diff()
                 gain = delta.clip(lower=0)
                 loss = -1 * delta.clip(upper=0)
@@ -373,7 +376,6 @@ with tab_tech:
                 rs = avg_gain / avg_loss
                 hist["RSI14"] = 100 - (100 / (1 + rs))
 
-                # 3. 買賣盤顏色判斷
                 colors_volume = [
                     "#26a69a" if close_val >= open_val else "#ef5350"
                     for open_val, close_val in zip(hist["Open"], hist["Close"])
@@ -386,10 +388,28 @@ with tab_tech:
                 volume = int(last_row["Volume"])
                 rsi = last_row["RSI14"]
                 bb_mid = last_row["MA20"]
+                curr = stock.fast_info.currency or ""
                 
                 delta_val = price - prev_close
                 delta_pct = (delta_val / prev_close) * 100
                 delta_display = f"{delta_val:+.2f} ({delta_pct:+.2f}%)"
+
+                # ----------------- 精確股息與息率計算 -----------------
+                div_rate = info_dict.get("dividendRate") or info_dict.get("trailingAnnualDividendRate")
+                ex_div_timestamp = info_dict.get("exDividendDate")
+                payout_timestamp = info_dict.get("dividendDate")
+
+                if div_rate is not None and div_rate > 0:
+                    div_rate_str = f"{div_rate:.2f} {curr}"
+                    # 直接以 (年化股息 / 當前最新股價) * 100 精確算出真實息率，避免資料庫小數點誤差
+                    real_yield = (div_rate / price) * 100
+                    div_yield_str = f"{real_yield:.2f}%"
+                else:
+                    div_rate_str = "無派息 / --"
+                    div_yield_str = "--"
+
+                ex_div_str = datetime.fromtimestamp(ex_div_timestamp).strftime('%Y-%m-%d') if ex_div_timestamp else "--"
+                payout_str = datetime.fromtimestamp(payout_timestamp).strftime('%Y-%m-%d') if payout_timestamp else "--"
 
                 # 第一排：股價與技術指標卡片
                 c1, c2, c3, c4 = st.columns(4)
@@ -406,14 +426,16 @@ with tab_tech:
                 d3.metric("除淨日 (Ex-Date)", ex_div_str)
                 d4.metric("派息日 (Pay Date)", payout_str)
 
-                # 繪製三層子圖
+                st.write("")  # 增加圖表與數據卡片的間距
+
+                # 繪製三層寬螢幕子圖
                 fig = make_subplots(
                     rows=3, cols=1, 
                     shared_xaxes=True, 
-                    vertical_spacing=0.04,
-                    row_heights=[0.60, 0.20, 0.20],
+                    vertical_spacing=0.06,
+                    row_heights=[0.58, 0.21, 0.21],
                     subplot_titles=(
-                        f"{display_title} 陰陽燭與保力加通道",
+                        "價格走勢與保力加通道 (Bollinger Bands)",
                         "成交量 (綠: 買入佔優 / 紅: 沽出佔優)",
                         "14 天相對強弱指標 (RSI)"
                     )
@@ -433,13 +455,13 @@ with tab_tech:
 
                 fig.add_trace(go.Scatter(
                     x=hist.index, y=hist["BB_Upper"],
-                    line=dict(color="rgba(150, 150, 150, 0.4)", width=1, dash="dash"),
+                    line=dict(color="rgba(150, 150, 150, 0.5)", width=1, dash="dash"),
                     name="BB 上軌 (+2σ)"
                 ), row=1, col=1)
 
                 fig.add_trace(go.Scatter(
                     x=hist.index, y=hist["BB_Lower"],
-                    line=dict(color="rgba(150, 150, 150, 0.4)", width=1, dash="dash"),
+                    line=dict(color="rgba(150, 150, 150, 0.5)", width=1, dash="dash"),
                     fill='tonexty',
                     fillcolor='rgba(200, 200, 200, 0.08)',
                     name="BB 通道"
@@ -466,17 +488,24 @@ with tab_tech:
                     name="RSI 14"
                 ), row=3, col=1)
 
-                fig.add_hline(y=70, line_dash="dot", line_color="red", row=2, col=1)
-                fig.add_hline(y=30, line_dash="dot", line_color="green", row=2, col=1)
+                fig.add_hline(y=70, line_dash="dot", line_color="red", row=3, col=1)
+                fig.add_hline(y=30, line_dash="dot", line_color="green", row=3, col=1)
 
+                # 將圖例置於最頂端上方，並留足邊距避免任何文字重疊
                 fig.update_layout(
                     xaxis_rangeslider_visible=False,
-                    margin=dict(l=10, r=10, t=30, b=10),
-                    height=640,
+                    margin=dict(l=10, r=10, t=65, b=10),
+                    height=680,
                     yaxis_title=f"價格 ({curr})",
                     yaxis2_title="成交量",
                     yaxis3_title="RSI",
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.05,
+                        xanchor="left",
+                        x=0
+                    )
                 )
                 fig.update_yaxes(range=[0, 100], row=3, col=1)
 
