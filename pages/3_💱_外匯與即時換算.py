@@ -5,87 +5,144 @@ import plotly.express as px
 
 st.set_page_config(page_title="外匯走勢與即時換算", page_icon="💱", layout="wide")
 
-st.title("💱 外匯走勢與即時換算")
-st.caption("選擇貨幣對後，直接在右側輸入金額即可即時換算；點擊中間「⇄ 互換」可一鍵反轉兌換方向")
+st.title("💱 外匯匯率與即時換算")
+st.caption("自選基準貨幣與目標貨幣，即時查詢匯率換算與歷史走勢")
 
-# 定義常用貨幣對與對應的反向貨幣對名稱
-fx_pairs = {
-    "🇨🇦 加元 兌 美元 (CAD → USD)": ("CADUSD=X", "CAD", "USD", "🇺🇸 美元 兌 加元 (USD → CAD)"),
-    "🇺🇸 美元 兌 加元 (USD → CAD)": ("CAD=X", "USD", "CAD", "🇨🇦 加元 兌 美元 (CAD → USD)"),
-    "🇨🇦 加元 兌 港幣 (CAD → HKD)": ("CADHKD=X", "CAD", "HKD", "🇭🇰 港幣 兌 加元 (HKD → CAD)"),
-    "🇭🇰 港幣 兌 加元 (HKD → CAD)": ("HKDCAD=X", "HKD", "CAD", "🇨🇦 加元 兌 港幣 (CAD → HKD)"),
-    "🇺🇸 美元 兌 港幣 (USD → HKD)": ("HKD=X", "USD", "HKD", "🇭🇰 港幣 兌 美元 (HKD → USD)"),
-    "🇭🇰 港幣 兌 美元 (HKD → USD)": ("HKDUSD=X", "HKD", "USD", "🇺🇸 美元 兌 港幣 (USD → HKD)"),
-    "🇺🇸 美元 兌 日圓 (USD → JPY)": ("JPY=X", "USD", "JPY", "🇯🇵 日圓 兌 美元 (JPY → USD)"),
-    "🇯🇵 日圓 兌 美元 (JPY → USD)": ("JPYUSD=X", "JPY", "USD", "🇺🇸 美元 兌 日圓 (USD → JPY)"),
-    "🇪🇺 歐元 兌 美元 (EUR → USD)": ("EURUSD=X", "EUR", "USD", "🇺🇸 美元 兌 歐元 (USD → EUR)"),
-    "🇺🇸 美元 兌 歐元 (USD → EUR)": ("EUR=X", "USD", "EUR", "🇪🇺 歐元 兌 美元 (EUR → USD)"),
+# 支援的獨立貨幣清單
+currencies = {
+    "加幣 (CAD)": "CAD",
+    "美元 (USD)": "USD",
+    "港幣 (HKD)": "HKD",
+    "日圓 (JPY)": "JPY",
+    "歐元 (EUR)": "EUR",
+    "英鎊 (GBP)": "GBP",
+    "澳幣 (AUD)": "AUD",
+    "台幣 (TWD)": "TWD",
+    "人民幣 (CNY)": "CNY",
 }
 
-pair_list = list(fx_pairs.keys())
-
-# 初始化下拉選單狀態
-if "fx_selected_pair" not in st.session_state:
-    st.session_state.fx_selected_pair = pair_list[0]
-
-def swap_currencies():
-    current_pair = st.session_state.fx_selected_pair
-    if current_pair in fx_pairs:
-        st.session_state.fx_selected_pair = fx_pairs[current_pair][3]
-
-# 雙欄排版 + 中間互換按鈕：左邊下拉選單 | 中間互換按鈕 | 右邊空白金額輸入框
-col_select, col_swap, col_input = st.columns([2, 0.55, 1.2])
-
-with col_select:
-    selected_label = st.selectbox(
-        "1. 選擇貨幣對：",
-        options=pair_list,
-        key="fx_selected_pair"
-    )
-
-with col_swap:
-    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-    st.button("⇄ 互換", on_click=swap_currencies, use_container_width=True, help="一鍵反轉兌換方向")
-
-with col_input:
-    amount = st.number_input(
-        "2. 輸入金額：",
-        min_value=0.0,
-        value=90.0,
-        step=10.0,
-        format="%.2f"
-    )
-
-ticker_code, from_curr, to_curr, _ = fx_pairs[selected_label]
-
 @st.cache_data(ttl=300)
-def get_fx_history(symbol: str):
-    df = yf.download(symbol, period="6mo", progress=False)
+def fetch_fx_data(from_code: str, to_code: str, period_str: str = "1mo"):
+    if from_code == to_code:
+        dates = pd.date_range(end=pd.Timestamp.today(), periods=10)
+        return pd.DataFrame({"Close": [1.0] * 10}, index=dates)
+    ticker = f"{from_code}{to_code}=X"
+    df = yf.download(ticker, period=period_str, progress=False)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     return df
 
-df_fx = get_fx_history(ticker_code)
+# --- 頂部 4 個常用匯率看板 ---
+top_pairs = [
+    ("加幣/港幣", "CAD", "HKD"),
+    ("美元/加幣", "USD", "CAD"),
+    ("美元/港幣", "HKD", "HKD") if False else ("美元/港幣", "USD", "HKD"),
+    ("日圓/港幣", "JPY", "HKD"),
+]
+
+top_cols = st.columns(4)
+for idx, (label, c1, c2) in enumerate(top_pairs):
+    df_top = fetch_fx_data(c1, c2, "5d")
+    with top_cols[idx]:
+        if not df_top.empty and len(df_top) >= 2:
+            cur = float(df_top["Close"].iloc[-1])
+            prv = float(df_top["Close"].iloc[-2])
+            diff = cur - prv
+            pct = (diff / prv) * 100
+            st.metric(label, f"{cur:.4f}", f"{diff:+.4f} ({pct:+.2f}%)")
+        else:
+            st.metric(label, "載入中", "-")
+
+st.divider()
+
+# --- 🔄 自選貨幣對換（兩欄獨立貨幣 + 互換按鈕 + 旁邊兩個空白計算欄）---
+st.subheader("🔄 自選貨幣對換")
+
+currency_labels = list(currencies.keys())
+
+if "fx_from" not in st.session_state:
+    st.session_state.fx_from = "加幣 (CAD)"
+if "fx_to" not in st.session_state:
+    st.session_state.fx_to = "港幣 (HKD)"
+
+def swap_currencies():
+    st.session_state.fx_from, st.session_state.fx_to = (
+        st.session_state.fx_to,
+        st.session_state.fx_from,
+    )
+
+# 並排 5 欄：[1. 基準貨幣] | [⇄ 互換] | [2. 目標貨幣] | [基準金額輸入] | [目標金額結果]
+col_from, col_swap, col_to, col_amt_from, col_amt_to = st.columns([1.4, 0.5, 1.4, 1.2, 1.2])
+
+with col_from:
+    from_label = st.selectbox("1. 基準貨幣 (From)：", currency_labels, key="fx_from")
+
+with col_swap:
+    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+    st.button("⇄ 互換", on_click=swap_currencies, use_container_width=True)
+
+with col_to:
+    to_label = st.selectbox("2. 目標貨幣 (To)：", currency_labels, key="fx_to")
+
+from_code = currencies[from_label]
+to_code = currencies[to_label]
+
+# 時間週期選擇
+period_map = {"1個月": "1mo", "6個月": "6mo", "1年": "1y", "5年": "5y"}
+selected_period_label = st.radio("時間週期：", list(period_map.keys()), horizontal=True, index=0)
+period_val = period_map[selected_period_label]
+
+# 抓取匯率數據
+df_fx = fetch_fx_data(from_code, to_code, period_val)
 
 if df_fx.empty:
-    st.error("暫時無法取得該貨幣對匯率，請稍後再試。")
+    st.error(f"暫時無法取得 {from_code}/{to_code} 的匯率數據，請稍後再試。")
 else:
     latest_rate = float(df_fx["Close"].iloc[-1])
     prev_rate = float(df_fx["Close"].iloc[-2]) if len(df_fx) >= 2 else latest_rate
     rate_diff = latest_rate - prev_rate
-    converted_result = amount * latest_rate
+    rate_pct = (rate_diff / prev_rate) * 100 if prev_rate else 0.0
 
-    # 醒目顯示即時換算結果
-    st.success(
-        f"### 💰 **{amount:,.2f} {from_curr}** ＝ **{converted_result:,.2f} {to_curr}**\n"
-        f"目前即時匯率：`1 {from_curr} = {latest_rate:.4f} {to_curr}`（較前一日 `{rate_diff:+.4f}`）"
+    # 在兩欄貨幣旁邊的 2 個空白計算位置填入數字並即時換算
+    with col_amt_from:
+        from_amount = st.number_input(
+            f"輸入 {from_code} 金額：",
+            min_value=0.0,
+            value=100.0,
+            step=10.0,
+            format="%.2f",
+            key="fx_from_amount"
+        )
+
+    calculated_to_amount = from_amount * latest_rate
+
+    with col_amt_to:
+        st.text_input(
+            f"兌換 {to_code} 總數：",
+            value=f"{calculated_to_amount:,.2f}",
+            disabled=False,
+            key=f"fx_to_display_{from_code}_{to_code}_{from_amount}"
+        )
+
+    # 最新報價大字指標
+    st.metric(
+        label=f"{from_label} 兌 {to_label} ({from_code}/{to_code}) 最新報價",
+        value=f"{latest_rate:.4f}",
+        delta=f"{rate_diff:+.4f} ({rate_pct:+.2f}%)"
     )
 
-    # 繪製近半年匯率走勢圖
+    # 歷史走勢折線圖
     fig = px.line(
-        df_fx, x=df_fx.index, y="Close",
-        title=f"{selected_label} 近 6 個月走勢圖",
-        labels={"Close": f"匯率 ({to_curr})", "Date": "日期"}
+        df_fx,
+        x=df_fx.index,
+        y="Close",
+        labels={"Close": f"匯率 ({to_code})", "Date": "日期"},
     )
-    fig.update_layout(height=420, margin=dict(l=20, r=20, t=40, b=20))
+    fig.update_traces(line_color="#00CC66", line_width=2.5)
+    fig.update_layout(
+        height=380,
+        margin=dict(l=10, r=10, t=20, b=10),
+        xaxis_title="",
+        yaxis_title=""
+    )
     st.plotly_chart(fig, use_container_width=True)
