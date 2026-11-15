@@ -1,534 +1,90 @@
 import streamlit as st
 import yfinance as yf
+import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import pandas as pd
-from datetime import datetime
-from streamlit_autorefresh import st_autorefresh
 
-# 寬螢幕全幅模式
-st.set_page_config(page_title="全球市場行情儀表板", layout="wide", page_icon="📈")
+st.set_page_config(page_title="美股技術分析儀表板", page_icon="📈", layout="wide")
 
-# 自訂 CSS：縮小指標數值字體，保持版面整齊
-st.markdown("""
-<style>
-div[data-testid="stMetricValue"] > div {
-    font-size: 1.30rem !important;
-    font-weight: 600;
-}
-div[data-testid="stMetricLabel"] > div {
-    font-size: 0.9rem !important;
-}
-div[data-testid="stMetricDelta"] > div {
-    font-size: 0.85rem !important;
-}
-</style>
-""", unsafe_allow_html=True)
+st.title("📈 美股技術分析儀表板")
+st.caption("支援 K 線圖、布林通道 (Bollinger Bands)、均線 (MA) 與 RSI 動能指標")
 
-st.title("📈 全球市場行情與技術分析")
+# 側邊欄參數設定
+with st.sidebar:
+    st.header("⚙️ 技術指標設定")
+    symbol = st.text_input("輸入股票代號 (例如 AAPL, NVDA, TSLA, SPY)：", value="NVDA").upper().strip()
+    period = st.selectbox("選擇時間範圍：", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
+    show_bb = st.checkbox("顯示布林通道 (BB 20, 2)", value=True)
+    show_ma = st.checkbox("顯示移動平均線 (MA20 / MA50)", value=True)
+    trail_pct = st.slider("移動止損參考百分比 (%)：", min_value=3.0, max_value=20.0, value=8.0, step=0.5)
 
-# 頂部更新控制列
-col_btn, col_interval, col_status = st.columns([1, 1.2, 4])
+@st.cache_data(ttl=300)
+def load_stock_data(ticker: str, period_str: str):
+    df = yf.download(ticker, period=period_str, progress=False)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df
 
-with col_btn:
-    if st.button("🔄 手動刷新"):
-        st.rerun()
+if symbol:
+    df = load_stock_data(symbol, period)
 
-with col_interval:
-    refresh_option = st.selectbox(
-        "自動刷新頻率：",
-        ["關閉", "30 秒", "1 分鐘", "5 分鐘"],
-        index=1,
-        label_visibility="collapsed"
-    )
-
-if refresh_option == "30 秒":
-    st_autorefresh(interval=30 * 1000, key="auto_refresh_timer")
-elif refresh_option == "1 分鐘":
-    st_autorefresh(interval=60 * 1000, key="auto_refresh_timer")
-elif refresh_option == "5 分鐘":
-    st_autorefresh(interval=300 * 1000, key="auto_refresh_timer")
-
-with col_status:
-    st.caption(f"最後更新：`{datetime.now().strftime('%H:%M:%S')}`")
-
-# 建立 5 個獨立分頁
-tab_fx, tab_hk, tab_ca, tab_us, tab_tech = st.tabs([
-    "💱 外匯匯率", 
-    "🇭🇰 香港股市", 
-    "🇨🇦 加拿大股市", 
-    "🇺🇸 美國股市",
-    "🔍 技術分析 (陰陽燭/成交量/RSI/股息)"
-])
-
-PERIOD_MAP = {"1個月": "1mo", "6個月": "6mo", "1年": "1y", "5年": "5y"}
-
-# 常見港股與熱門股票中文對照表
-CHINESE_NAME_MAP = {
-    "^HSI": "恒生指數",
-    "0001.HK": "長和",
-    "0002.HK": "中電控股",
-    "0003.HK": "香港中華煤氣",
-    "0005.HK": "滙豐控股",
-    "0006.HK": "電能實業",
-    "0011.HK": "恒生銀行",
-    "0012.HK": "恒基地產",
-    "0016.HK": "新鴻基地產",
-    "0017.HK": "新世界發展",
-    "0027.HK": "銀河娛樂",
-    "0066.HK": "港鐵公司",
-    "0175.HK": "吉利汽車",
-    "0267.HK": "中信股份",
-    "0288.HK": "萬洲國際",
-    "0386.HK": "中國石油化工",
-    "0388.HK": "香港交易所",
-    "0700.HK": "騰訊控股",
-    "0823.HK": "領展房產基金",
-    "0857.HK": "中國石油股份",
-    "0883.HK": "中國海洋石油",
-    "0939.HK": "建設銀行",
-    "0941.HK": "中國移動",
-    "0968.HK": "信義光能",
-    "0981.HK": "中芯國際",
-    "0992.HK": "聯想集團",
-    "1024.HK": "快手",
-    "1088.HK": "中國神華",
-    "1093.HK": "石藥集團",
-    "1109.HK": "華潤置地",
-    "1113.HK": "長實集團",
-    "1177.HK": "中生製藥",
-    "1211.HK": "比亞迪股份",
-    "1299.HK": "友邦保險",
-    "1398.HK": "工商銀行",
-    "1810.HK": "小米集團",
-    "1928.HK": "金沙中國",
-    "2015.HK": "理想汽車",
-    "2020.HK": "安踏體育",
-    "2269.HK": "藥明生物",
-    "2318.HK": "中國平安",
-    "2319.HK": "蒙牛乳業",
-    "2328.HK": "中國財險",
-    "2382.HK": "舜宇光學科技",
-    "2388.HK": "中銀香港",
-    "2800.HK": "盈富基金",
-    "3690.HK": "美團",
-    "3968.HK": "招商銀行",
-    "3988.HK": "中國銀行",
-    "9618.HK": "京東集團",
-    "9866.HK": "蔚來",
-    "9868.HK": "小鵬汽車",
-    "9888.HK": "百度集團",
-    "9961.HK": "攜程集團",
-    "9988.HK": "阿里巴巴",
-    "9999.HK": "網易",
-    "AAPL": "蘋果公司",
-    "MSFT": "微軟公司",
-    "NVDA": "輝達 / 英偉達",
-    "GOOGL": "谷歌 Alphabet",
-    "AMZN": "亞馬遜",
-    "TSLA": "特斯拉",
-    "RY.TO": "加拿大皇家銀行",
-    "TD.TO": "道明銀行",
-    "BNS.TO": "豐業銀行",
-    "ENB.TO": "安橋能源",
-}
-
-def render_simple_chart(ticker_symbol: str, label_name: str, period_key: str, line_color: str = "#29b5e8"):
-    try:
-        t = yf.Ticker(ticker_symbol)
-        hist = t.history(period=PERIOD_MAP[period_key])
-
-        # 若為外匯且直接代碼抓不到歷史圖表 (例如某些反向貨幣對)，自動透過 USD 交叉計算
-        if hist.empty and ticker_symbol.endswith("=X") and len(ticker_symbol) == 8:
-            base_c = ticker_symbol[:3]
-            target_c = ticker_symbol[3:6]
-            
-            h_base = pd.Series(1.0, index=yf.Ticker("USDCAD=X").history(period=PERIOD_MAP[period_key]).index) if base_c == "USD" else yf.Ticker(f"USD{base_c}=X").history(period=PERIOD_MAP[period_key])["Close"]
-            h_target = pd.Series(1.0, index=yf.Ticker("USDCAD=X").history(period=PERIOD_MAP[period_key]).index) if target_c == "USD" else yf.Ticker(f"USD{target_c}=X").history(period=PERIOD_MAP[period_key])["Close"]
-            
-            df_cross = pd.DataFrame({"base": h_base, "target": h_target}).dropna()
-            if not df_cross.empty:
-                cross_close = df_cross["target"] / df_cross["base"]
-                hist = pd.DataFrame({"Close": cross_close})
-
-        if hist.empty:
-            st.warning(f"暫無 `{ticker_symbol}` 的歷史走勢數據。")
-            return
-
-        price = float(hist["Close"].iloc[-1])
-        prev = float(hist["Close"].iloc[-2]) if len(hist) > 1 else price
-        curr = "" if "=X" in ticker_symbol else (t.fast_info.currency or "")
-        
-        delta_val = price - prev
-        delta_pct = (delta_val / prev) * 100
-
-        if "=X" in ticker_symbol:
-            delta_str = f"{delta_val:+.4f} ({delta_pct:+.2f}%)"
-            val_str = f"{price:.4f}"
-        else:
-            delta_str = f"{delta_val:+.2f} ({delta_pct:+.2f}%)"
-            val_str = f"{price:.2f} {curr}"
-
-        st.metric(
-            label=f"{label_name} 最新報價",
-            value=val_str,
-            delta=delta_str
-        )
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=hist.index, 
-            y=hist["Close"], 
-            mode="lines",
-            name="收盤價",
-            line=dict(color=line_color, width=2)
-        ))
-        fig.update_layout(
-            margin=dict(l=10, r=10, t=20, b=10),
-            height=360,
-            xaxis_title="日期",
-            yaxis_title=f"匯率 / 價格 ({curr})" if curr else "匯率"
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-    except Exception as e:
-        st.error(f"取得報價失敗：{e}")
-
-# ==========================================
-# 分頁 1：外匯 (雙下拉選單 + 一鍵互換 + 人民幣支援)
-# ==========================================
-with tab_fx:
-    st.caption("自選基準貨幣與目標貨幣，即時查詢匯率換算與歷史走勢")
-
-    col1, col2, col3, col4 = st.columns(4)
-    quick_fx = [
-        ("加幣/港幣", "CADHKD=X", col1),
-        ("美元/加幣", "USDCAD=X", col2),
-        ("美元/港幣", "USDHKD=X", col3),
-        ("日圓/港幣", "JPYHKD=X", col4),
-    ]
-    for name, sym, col in quick_fx:
-        try:
-            p = yf.Ticker(sym).fast_info.last_price
-            prev_p = yf.Ticker(sym).fast_info.previous_close
-            d_val = p - prev_p
-            d_pct = (d_val / prev_p) * 100
-            col.metric(label=name, value=f"{p:.4f}", delta=f"{d_val:+.4f} ({d_pct:+.2f}%)")
-        except Exception:
-            col.metric(label=name, value="--")
-
-    st.markdown("---")
-
-    CURRENCIES = {
-        "加幣 (CAD)": "CAD",
-        "港幣 (HKD)": "HKD",
-        "美元 (USD)": "USD",
-        "英鎊 (GBP)": "GBP",
-        "日圓 (JPY)": "JPY",
-        "歐元 (EUR)": "EUR",
-        "澳幣 (AUD)": "AUD",
-        "人民幣 (CNY)": "CNY",
-        "瑞士法郎 (CHF)": "CHF",
-        "新台幣 (TWD)": "TWD",
-        "新加坡幣 (SGD)": "SGD"
-    }
-    currency_labels = list(CURRENCIES.keys())
-
-    if "fx_base_select" not in st.session_state:
-        st.session_state["fx_base_select"] = "加幣 (CAD)"
-    if "fx_target_select" not in st.session_state:
-        st.session_state["fx_target_select"] = "港幣 (HKD)"
-
-    def swap_currencies():
-        temp = st.session_state["fx_base_select"]
-        st.session_state["fx_base_select"] = st.session_state["fx_target_select"]
-        st.session_state["fx_target_select"] = temp
-
-    st.write("### 💱 自選貨幣對換")
-    fx_col1, fx_btn_col, fx_col2 = st.columns([4, 1, 4])
-
-    with fx_col1:
-        base_name = st.selectbox(
-            "1. 基準貨幣（From）：",
-            currency_labels,
-            key="fx_base_select"
-        )
-
-    with fx_btn_col:
-        st.write("")
-        st.write("")
-        st.button("⇄ 互換", on_click=swap_currencies, use_container_width=True)
-
-    with fx_col2:
-        target_name = st.selectbox(
-            "2. 目標貨幣（To）：",
-            currency_labels,
-            key="fx_target_select"
-        )
-
-    base_code = CURRENCIES[base_name]
-    target_code = CURRENCIES[target_name]
-
-    if base_code == target_code:
-        st.warning("基準貨幣與目標貨幣相同，匯率固定為 1.0000。請選擇不同的貨幣進行換算。")
+    if df.empty:
+        st.error(f"找不到代號 `{symbol}` 的數據，請確認輸入是否正確。")
     else:
-        pair_symbol = f"{base_code}{target_code}=X"
-        pair_display = f"{base_name} 兌 {target_name} ({base_code}/{target_code})"
-        fx_range = st.radio("時間週期：", list(PERIOD_MAP.keys()), horizontal=True, key="fx_range")
-        render_simple_chart(pair_symbol, pair_display, fx_range, line_color="#00BA38")
+        # 計算技術指標
+        df["MA20"] = df["Close"].rolling(window=20).mean()
+        df["MA50"] = df["Close"].rolling(window=50).mean()
+        df["STD20"] = df["Close"].rolling(window=20).std()
+        df["BB_Upper"] = df["MA20"] + (df["STD20"] * 2)
+        df["BB_Lower"] = df["MA20"] - (df["STD20"] * 2)
 
-# ==========================================
-# 分頁 2：港股
-# ==========================================
-with tab_hk:
-    st.caption("香港恆生指數及藍籌股（代號後綴為 .HK）")
-    HK_WATCHLIST = {
-        "恆生指數 (^HSI)": "^HSI",
-        "騰訊控股 (0700.HK)": "0700.HK",
-        "匯豐控股 (0005.HK)": "0005.HK",
-        "阿里巴巴 (9988.HK)": "9988.HK",
-        "美團 (3690.HK)": "3690.HK",
-        "比亞迪股份 (1211.HK)": "1211.HK",
-        "港交所 (0388.HK)": "0388.HK",
-        "領展房產基金 (0823.HK)": "0823.HK",
-    }
-    selected_hk = st.selectbox("選擇港股：", list(HK_WATCHLIST.keys()), key="hk_select")
-    hk_range = st.radio("時間週期：", list(PERIOD_MAP.keys()), horizontal=True, key="hk_range")
-    render_simple_chart(HK_WATCHLIST[selected_hk], selected_hk, hk_range, line_color="#FF6161")
+        # 計算 RSI (14)
+        delta = df["Close"].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        df["RSI"] = 100 - (100 / (1 + rs))
 
-# ==========================================
-# 分頁 3：加股
-# ==========================================
-with tab_ca:
-    st.caption("加拿大多倫多證券交易所股票及 ETF（代號後綴為 .TO）")
-    CA_WATCHLIST = {
-        "標普/多倫多綜合指數 (^GSPTSE)": "^GSPTSE",
-        "加拿大皇家銀行 (RY.TO)": "RY.TO",
-        "道明銀行 (TD.TO)": "TD.TO",
-        "加拿大豐業銀行 (BNS.TO)": "BNS.TO",
-        "安橋能源 (ENB.TO)": "ENB.TO",
-        "加拿大鵝 (GOOS.TO)": "GOOS.TO",
-        "加拿大國家鐵路 (CNR.TO)": "CNR.TO",
-        "iShares 標普多倫多60 ETF (XIU.TO)": "XIU.TO",
-    }
-    selected_ca = st.selectbox("選擇加股：", list(CA_WATCHLIST.keys()), key="ca_select")
-    ca_range = st.radio("時間週期：", list(PERIOD_MAP.keys()), horizontal=True, key="ca_range")
-    render_simple_chart(CA_WATCHLIST[selected_ca], selected_ca, ca_range, line_color="#F8766D")
+        # 頂部關鍵數據卡片
+        latest_close = float(df["Close"].iloc[-1])
+        prev_close = float(df["Close"].iloc[-2])
+        change = latest_close - prev_close
+        pct_change = (change / prev_close) * 100
+        high_in_period = float(df["High"].max())
+        trailing_stop_price = high_in_period * (1 - trail_pct / 100)
+        latest_rsi = float(df["RSI"].iloc[-1])
 
-# ==========================================
-# 分頁 4：美股
-# ==========================================
-with tab_us:
-    st.caption("美國大盤指數 ETF 與熱門個股")
-    US_WATCHLIST = {
-        "標普 500 ETF (SPY)": "SPY",
-        "納斯達克 100 ETF (QQQ)": "QQQ",
-        "道瓊斯工業 ETF (DIA)": "DIA",
-        "蘋果 (AAPL)": "AAPL",
-        "微軟 (MSFT)": "MSFT",
-        "英偉達 (NVDA)": "NVDA",
-        "谷歌 (GOOGL)": "GOOGL",
-        "亞馬遜 (AMZN)": "AMZN",
-        "波克夏海瑟威 B (BRK-B)": "BRK-B",
-    }
-    selected_us = st.selectbox("選擇美股：", list(US_WATCHLIST.keys()), key="us_select")
-    us_range = st.radio("時間週期：", list(PERIOD_MAP.keys()), horizontal=True, key="us_range")
-    render_simple_chart(US_WATCHLIST[selected_us], selected_us, us_range, line_color="#619CFF")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric(f"{symbol} 最新收盤價", f"${latest_close:,.2f}", f"{change:+.2f} ({pct_change:+.2f}%)")
+        c2.metric("區間最高價", f"${high_in_period:,.2f}")
+        c3.metric(f"移動止損位 (-{trail_pct}%)", f"${trailing_stop_price:,.2f}")
+        c4.metric("最新 RSI (14)", f"{latest_rsi:.1f}", "超買 (>70)" if latest_rsi > 70 else ("超賣 (<30)" if latest_rsi < 30 else "中性區間"))
 
-# ==========================================
-# 分頁 5：技術分析 (陰陽燭 / 成交量 / RSI / 股息)
-# ==========================================
-with tab_tech:
-    st.caption("輸入任意股票代號，查詢即時股價、股息派息日、陰陽燭、買沽成交量、保力加通道與 RSI")
-
-    search_col1, search_col2 = st.columns([4, 1])
-    with search_col1:
-        raw_input = st.text_input(
-            "輸入股票代號：",
-            value="NVDA",
-            placeholder="美股直接輸入(如 NVDA, AAPL)；港股直接輸號碼(如 5 或 0005.HK)；加股加 .TO",
-            key="tech_search_input"
-        ).strip().upper()
-
-    with search_col2:
-        search_range = st.selectbox(
-            "查看週期：",
-            ["3個月", "6個月", "1年", "2年"],
-            index=1,
-            key="tech_range_select"
+        # 繪製 K 線與 RSI 雙層圖表
+        fig = make_subplots(
+            rows=2, cols=1, shared_xaxes=True,
+            vertical_spacing=0.06, row_heights=[0.72, 0.28],
+            subplot_titles=(f"{symbol} 價格走勢與技術指標", "RSI (14) 相對強弱指標")
         )
 
-    PERIOD_SEARCH_MAP = {"3個月": "3mo", "6個月": "6mo", "1年": "1y", "2年": "2y"}
+        # K 線圖
+        fig.add_trace(go.Candlestick(
+            x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
+            name="K線"
+        ), row=1, col=1)
 
-    search_symbol = raw_input
-    if raw_input.isdigit():
-        search_symbol = f"{int(raw_input):04d}.HK"
+        if show_ma:
+            fig.add_trace(go.Scatter(x=df.index, y=df["MA20"], line=dict(color="orange", width=1.5), name="MA20"), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df["MA50"], line=dict(color="royalblue", width=1.5), name="MA50"), row=1, col=1)
 
-    if search_symbol:
-        try:
-            stock = yf.Ticker(search_symbol)
-            hist = stock.history(period=PERIOD_SEARCH_MAP[search_range])
+        if show_bb:
+            fig.add_trace(go.Scatter(x=df.index, y=df["BB_Upper"], line=dict(color="gray", width=1, dash="dot"), name="布林上軌"), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df["BB_Lower"], line=dict(color="gray", width=1, dash="dot"), fill="tonexty", fillcolor="rgba(128,128,128,0.1)", name="布林下軌"), row=1, col=1)
 
-            if hist.empty:
-                st.warning(f"查無標的 `{search_symbol}`，請確認代號格式是否正確。")
-            else:
-                eng_name = search_symbol
-                info_dict = {}
-                try:
-                    info_dict = stock.info or {}
-                    eng_name = info_dict.get("longName") or info_dict.get("shortName") or search_symbol
-                except Exception:
-                    eng_name = search_symbol
+        # RSI 線
+        fig.add_trace(go.Scatter(x=df.index, y=df["RSI"], line=dict(color="purple", width=1.5), name="RSI(14)"), row=2, col=1)
+        fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+        fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
 
-                chinese_name = CHINESE_NAME_MAP.get(search_symbol, "")
-                display_title = f"{chinese_name} {eng_name} ({search_symbol})" if chinese_name else f"{eng_name} ({search_symbol})"
-
-                st.subheader(f"🏢 {display_title}")
-
-                # 1. 保力加通道 (20MA, 2倍標準差)
-                hist["MA20"] = hist["Close"].rolling(window=20).mean()
-                hist["STD20"] = hist["Close"].rolling(window=20).std()
-                hist["BB_Upper"] = hist["MA20"] + (hist["STD20"] * 2)
-                hist["BB_Lower"] = hist["MA20"] - (hist["STD20"] * 2)
-
-                # 2. 14天 RSI (Wilder 平滑)
-                delta = hist["Close"].diff()
-                gain = delta.clip(lower=0)
-                loss = -1 * delta.clip(upper=0)
-                avg_gain = gain.ewm(com=13, adjust=False).mean()
-                avg_loss = loss.ewm(com=13, adjust=False).mean()
-                rs = avg_gain / avg_loss
-                hist["RSI14"] = 100 - (100 / (1 + rs))
-
-                colors_volume = [
-                    "#26a69a" if close_val >= open_val else "#ef5350"
-                    for open_val, close_val in zip(hist["Open"], hist["Close"])
-                ]
-
-                last_row = hist.iloc[-1]
-                prev_close = hist["Close"].iloc[-2] if len(hist) > 1 else last_row["Close"]
-                
-                price = last_row["Close"]
-                volume = int(last_row["Volume"])
-                rsi = last_row["RSI14"]
-                bb_mid = last_row["MA20"]
-                curr = stock.fast_info.currency or ""
-                
-                delta_val = price - prev_close
-                delta_pct = (delta_val / prev_close) * 100
-                delta_display = f"{delta_val:+.2f} ({delta_pct:+.2f}%)"
-
-                # 精確股息與息率計算
-                div_rate = info_dict.get("dividendRate") or info_dict.get("trailingAnnualDividendRate")
-                ex_div_timestamp = info_dict.get("exDividendDate")
-                payout_timestamp = info_dict.get("dividendDate")
-
-                if div_rate is not None and div_rate > 0:
-                    div_rate_str = f"{div_rate:.2f} {curr}"
-                    real_yield = (div_rate / price) * 100
-                    div_yield_str = f"{real_yield:.2f}%"
-                else:
-                    div_rate_str = "無派息 / --"
-                    div_yield_str = "--"
-
-                ex_div_str = datetime.fromtimestamp(ex_div_timestamp).strftime('%Y-%m-%d') if ex_div_timestamp else "--"
-                payout_str = datetime.fromtimestamp(payout_timestamp).strftime('%Y-%m-%d') if payout_timestamp else "--"
-
-                # 第一排：股價與技術指標卡片
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("當前最新價", f"{price:.2f} {curr}", delta_display)
-                c2.metric("最新成交量", f"{volume:,.0f}")
-                rsi_status = " (超買)" if rsi >= 70 else (" (超賣)" if rsi <= 30 else " (中性)")
-                c3.metric("14天 RSI", f"{rsi:.1f}{rsi_status}")
-                c4.metric("保力加中軌(20MA)", f"{bb_mid:.2f} {curr}")
-
-                # 第二排：股息與派息資訊卡片
-                d1, d2, d3, d4 = st.columns(4)
-                d1.metric("每股股息 (年化)", div_rate_str)
-                d2.metric("股息率 (息率)", div_yield_str)
-                d3.metric("除淨日 (Ex-Date)", ex_div_str)
-                d4.metric("派息日 (Pay Date)", payout_str)
-
-                st.write("")
-
-                # 繪製三層寬螢幕子圖
-                fig = make_subplots(
-                    rows=3, cols=1, 
-                    shared_xaxes=True, 
-                    vertical_spacing=0.06,
-                    row_heights=[0.58, 0.21, 0.21],
-                    subplot_titles=(
-                        "價格走勢與保力加通道 (Bollinger Bands)",
-                        "成交量 (綠: 買入佔優 / 紅: 沽出佔優)",
-                        "14 天相對強弱指標 (RSI)"
-                    )
-                )
-
-                fig.add_trace(go.Candlestick(
-                    x=hist.index,
-                    open=hist["Open"],
-                    high=hist["High"],
-                    low=hist["Low"],
-                    close=hist["Close"],
-                    name="陰陽燭",
-                    increasing_line_color="#26a69a",
-                    decreasing_line_color="#ef5350"
-                ), row=1, col=1)
-
-                fig.add_trace(go.Scatter(
-                    x=hist.index, y=hist["BB_Upper"],
-                    line=dict(color="rgba(150, 150, 150, 0.5)", width=1, dash="dash"),
-                    name="BB 上軌 (+2σ)"
-                ), row=1, col=1)
-
-                fig.add_trace(go.Scatter(
-                    x=hist.index, y=hist["BB_Lower"],
-                    line=dict(color="rgba(150, 150, 150, 0.5)", width=1, dash="dash"),
-                    fill='tonexty',
-                    fillcolor='rgba(200, 200, 200, 0.08)',
-                    name="BB 通道"
-                ), row=1, col=1)
-
-                fig.add_trace(go.Scatter(
-                    x=hist.index, y=hist["MA20"],
-                    line=dict(color="orange", width=1.5),
-                    name="20日均線"
-                ), row=1, col=1)
-
-                fig.add_trace(go.Bar(
-                    x=hist.index,
-                    y=hist["Volume"],
-                    marker_color=colors_volume,
-                    name="成交量"
-                ), row=2, col=1)
-
-                fig.add_trace(go.Scatter(
-                    x=hist.index, y=hist["RSI14"],
-                    line=dict(color="#ab63fa", width=2),
-                    name="RSI 14"
-                ), row=3, col=1)
-
-                fig.add_hline(y=70, line_dash="dot", line_color="red", row=3, col=1)
-                fig.add_hline(y=30, line_dash="dot", line_color="green", row=3, col=1)
-
-                fig.update_layout(
-                    xaxis_rangeslider_visible=False,
-                    margin=dict(l=10, r=10, t=65, b=10),
-                    height=680,
-                    yaxis_title=f"價格 ({curr})",
-                    yaxis2_title="成交量",
-                    yaxis3_title="RSI",
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.05,
-                        xanchor="left",
-                        x=0
-                    )
-                )
-                fig.update_yaxes(range=[0, 100], row=3, col=1)
-
-                st.plotly_chart(fig, use_container_width=True)
-
-        except Exception as e:
-            st.error(f"分析 `{search_symbol}` 時發生錯誤：{e}")
+        fig.update_layout(height=680, xaxis_rangeslider_visible=False, margin=dict(l=20, r=20, t=40, b=20))
+        st.plotly_chart(fig, use_container_width=True)
