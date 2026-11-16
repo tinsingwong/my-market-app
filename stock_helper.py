@@ -4,8 +4,10 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
+import time
 
-@st.cache_data(ttl=300)
+# 縮短快取為 15 秒，確保實時更新時能抓到最新盤中報價
+@st.cache_data(ttl=15)
 def load_stock_and_info(ticker_str: str, period_str: str):
     tk = yf.Ticker(ticker_str)
     df = tk.history(period=period_str)
@@ -30,12 +32,29 @@ def render_market_dashboard(market_title: str, default_sym: str, hint_text: str,
     st.title(market_title)
 
     with st.sidebar:
+        st.header("⚡ 即時報價更新")
+        if st.button("🔄 立即更新最新股價", use_container_width=True, key=f"refresh_btn_{market_type}"):
+            st.cache_data.clear()
+            st.rerun()
+
+        auto_refresh = st.toggle("開啟自動實時更新", value=False, key=f"auto_ref_{market_type}")
+        refresh_sec = st.slider(
+            "更新頻率 (秒)：",
+            min_value=15,
+            max_value=120,
+            value=30,
+            step=15,
+            disabled=not auto_refresh,
+            key=f"ref_sec_{market_type}"
+        )
+
+        st.divider()
         st.header("⚙️ 股票與技術指標設定")
-        raw_symbol = st.text_input("輸入股票代號：", value=default_sym, help=hint_text).upper().strip()
-        period = st.selectbox("選擇時間範圍：", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
-        show_bb = st.checkbox("顯示布林通道 (BB 20, 2)", value=True)
-        show_ma = st.checkbox("顯示移動平均線 (MA20 / MA50)", value=True)
-        trail_pct = st.slider("移動止損參考百分比 (%)：", min_value=3.0, max_value=20.0, value=8.0, step=0.5)
+        raw_symbol = st.text_input("輸入股票代號：", value=default_sym, help=hint_text, key=f"sym_{market_type}").upper().strip()
+        period = st.selectbox("選擇時間範圍：", ["3mo", "6mo", "1y", "2y", "5y"], index=2, key=f"per_{market_type}")
+        show_bb = st.checkbox("顯示布林通道 (BB 20, 2)", value=True, key=f"bb_{market_type}")
+        show_ma = st.checkbox("顯示移動平均線 (MA20 / MA50)", value=True, key=f"ma_{market_type}")
+        trail_pct = st.slider("移動止損參考百分比 (%)：", min_value=3.0, max_value=20.0, value=8.0, step=0.5, key=f"trail_{market_type}")
 
     # 自動格式化各市場代號與幣別
     symbol = raw_symbol
@@ -151,3 +170,8 @@ def render_market_dashboard(market_title: str, default_sym: str, hint_text: str,
 
     fig.update_layout(height=820, xaxis_rangeslider_visible=False, margin=dict(l=20, r=20, t=40, b=20))
     st.plotly_chart(fig, use_container_width=True)
+
+    # 若開啟自動實時更新，依設定秒數自動刷新
+    if auto_refresh:
+        time.sleep(refresh_sec)
+        st.rerun()
