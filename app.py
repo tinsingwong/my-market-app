@@ -1,7 +1,17 @@
 import streamlit as st
 from stock_helper import render_market_dashboard
 
-st.set_page_config(page_title="美國股市技術分析", page_icon="🇺🇸", layout="wide")
+st.set_page_config(page_title="全球股市技術分析", page_icon="🇺🇸", layout="wide")
+
+# ==========================================
+# 全域左側欄：所有頁面（美股、加股、港股、外匯、期權、自選總覽）共用
+# ==========================================
+with st.sidebar:
+    st.header("⚡ 全站即時報價更新")
+    if st.button("🔄 重新整理即時報價", use_container_width=True, type="primary"):
+        st.cache_data.clear()
+        st.rerun()
+    st.divider()
 
 def us_market_page():
     render_market_dashboard(
@@ -11,7 +21,7 @@ def us_market_page():
         market_type="US"
     )
 
-# 自訂左側導覽選單，將原本的 "app" 改名為 "美國股市 (US)"
+# 自訂左側導覽選單
 pages = [
     st.Page(us_market_page, title="美國股市 (US)", icon="🇺🇸", default=True),
     st.Page("pages/1_🇨🇦_加拿大股市.py", title="加拿大股市 (CA)", icon="🇨🇦"),
