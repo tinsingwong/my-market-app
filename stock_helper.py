@@ -3,12 +3,12 @@ import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 import urllib.request
 import re
 
-# 常用港股及熱門 ETF 中文名稱對照表（即時零延遲）
+# 常用港股及熱門 ETF 中文名稱對照表
 HK_STOCK_NAMES = {
     "0001.HK": "長和",
     "0002.HK": "中電控股",
@@ -93,7 +93,6 @@ HK_STOCK_NAMES = {
 
 @st.cache_data(ttl=86400)
 def get_hk_chinese_name(ticker_str: str) -> str:
-    """優先從內建對照表取得港股中文名，若不在表中則嘗試從新浪財經即時查詢補充"""
     if ticker_str in HK_STOCK_NAMES:
         return HK_STOCK_NAMES[ticker_str]
     try:
@@ -109,17 +108,30 @@ def get_hk_chinese_name(ticker_str: str) -> str:
         pass
     return ""
 
-# 縮短快取為 15 秒，確保實時更新時能抓到最新盤中報價
+# 同時抓取歷史股價、基本資訊與真實派息紀錄 (dividends)
 @st.cache_data(ttl=15)
 def load_stock_and_info(ticker_str: str, period_str: str):
     tk = yf.Ticker(ticker_str)
     df = tk.history(period=period_str)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    # 清除收盤價為 NaN 的無效列，確保最新收盤價永遠有有效數字
+    if not df.empty and "Close" in df.columns:
+        df = df.dropna(subset=["Close"])
+
     info = {}
     try:
         info = tk.info or {}
     except Exception:
         info = {}
-    return df, info
+
+    divs = pd.Series(dtype=float)
+    try:
+        divs = tk.dividends
+    except Exception:
+        divs = pd.Series(dtype=float)
+
+    return df, info, divs
 
 def format_timestamp(ts):
     if not ts:
@@ -169,7 +181,7 @@ def render_market_dashboard(market_title: str, default_sym: str, hint_text: str,
         return
 
     with st.spinner(f"正在載入 {symbol} 數據與股息資訊..."):
-        df, info = load_stock_and_info(symbol, period)
+        df, info, divs = load_stock_and_info(symbol, period)
 
     if df.empty:
         st.error(f"找不到代號 `{symbol}` 的數據，請檢查輸入是否正確。")
@@ -198,15 +210,21 @@ def render_market_dashboard(market_title: str, default_sym: str, hint_text: str,
     rs = gain / loss
     df["RSI"] = 100 - (100 / (1 + rs))
 
-    # 第一排：價格與技術數據
+    # 第一排：價格與技術數據（若盤中 df 最後一筆為空，自動備援 info 的現價）
     latest_close = float(df["Close"].iloc[-1])
+    if pd.isna(latest_close) or latest_close == 0:
+        latest_close = float(info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose") or 0.0)
+
     prev_close = float(df["Close"].iloc[-2]) if len(df) >= 2 else latest_close
+    if pd.isna(prev_close) or prev_close == 0:
+        prev_close = float(info.get("previousClose") or latest_close)
+
     change = latest_close - prev_close
-    pct_change = (change / prev_close) * 100 if prev_close else 0
-    high_in_period = float(df["High"].max())
+    pct_change = (change / prev_close) * 100 if prev_close else 0.0
+    high_in_period = float(df["High"].dropna().max()) if not df["High"].dropna().empty else latest_close
     trailing_stop_price = high_in_period * (1 - trail_pct / 100)
-    latest_rsi = float(df["RSI"].iloc[-1]) if pd.notna(df["RSI"].iloc[-1]) else 50.0
-    latest_vol = int(df["Volume"].iloc[-1])
+    latest_rsi = float(df["RSI"].dropna().iloc[-1]) if not df["RSI"].dropna().empty else 50.0
+    latest_vol = int(df["Volume"].fillna(0).iloc[-1])
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("最新收盤價", f"{currency_sign}{latest_close:,.2f}", f"{change:+.2f} ({pct_change:+.2f}%)")
@@ -215,25 +233,50 @@ def render_market_dashboard(market_title: str, default_sym: str, hint_text: str,
     c4.metric(f"移動止損位 (-{trail_pct}%)", f"{currency_sign}{trailing_stop_price:,.2f}")
     c5.metric("最新 RSI (14)", f"{latest_rsi:.1f}", "超買 (>70)" if latest_rsi > 70 else ("超賣 (<30)" if latest_rsi < 30 else "中性區間"))
 
-    # 第二排：每股股息、息率、除淨日、派息日
+    # 第二排：精準計算全年每股股息、息率、最近除淨日與派息次數
     div_rate = info.get("dividendRate") or info.get("trailingAnnualDividendRate")
-    div_yield = info.get("dividendYield") or info.get("trailingAnnualDividendYield")
     ex_div_date = format_timestamp(info.get("exDividendDate"))
     pay_div_date = format_timestamp(info.get("dividendDate"))
+    div_freq_text = ""
 
-    if div_yield is not None:
-        yield_pct = div_yield * 100 if div_yield < 0.35 else div_yield
+    # 若 info 缺少港股股息，直接從真實歷史派息紀錄 (divs) 加總過去 12 個月派息
+    if divs is not None and not divs.empty:
+        divs_clean = divs[divs > 0]
+        if not divs_clean.empty:
+            # 取得最近一次除淨日
+            last_ex_dt = divs_clean.index[-1]
+            if ex_div_date == "無資料":
+                ex_div_date = last_ex_dt.strftime("%Y-%m-%d")
+
+            # 篩選過去 370 天內的實際派息紀錄並加總（例如 0002.HK 一年派 4 次息）
+            cutoff_date = pd.Timestamp.now(tz=last_ex_dt.tz) - pd.Timedelta(days=370)
+            recent_12m_divs = divs_clean[divs_clean.index >= cutoff_date]
+            if not recent_12m_divs.empty:
+                calc_annual_div = float(recent_12m_divs.sum())
+                div_freq_text = f"（近1年派息 {len(recent_12m_divs)} 次）"
+                if not div_rate or div_rate == 0:
+                    div_rate = calc_annual_div
+
+    # 計算真實股息率（全年每股股息 / 最新股價）
+    if div_rate and div_rate > 0 and latest_close > 0:
+        yield_pct = (float(div_rate) / latest_close) * 100
         yield_str = f"{yield_pct:.2f}%"
+        div_rate_str = f"{currency_sign}{float(div_rate):,.3f}"
     else:
-        yield_str = "無派息 / 無資料"
+        div_yield = info.get("dividendYield") or info.get("trailingAnnualDividendYield")
+        if div_yield is not None and div_yield > 0:
+            yield_pct = div_yield * 100 if div_yield < 0.35 else div_yield
+            yield_str = f"{yield_pct:.2f}%"
+            div_rate_str = f"{currency_sign}{float(div_rate):,.3f}" if div_rate else "依息率推算"
+        else:
+            yield_str = "無派息 / 無資料"
+            div_rate_str = "無派息 / 無資料"
 
-    div_rate_str = f"{currency_sign}{div_rate:,.3f}" if div_rate else "無派息 / 無資料"
-
-    st.markdown("#### 💰 股息與除淨資訊")
+    st.markdown(f"#### 💰 股息與除淨資訊 {div_freq_text}")
     d1, d2, d3, d4 = st.columns(4)
-    d1.metric("全年每股股息", div_rate_str)
+    d1.metric("全年每股股息 (TTM)", div_rate_str)
     d2.metric("股息率 (息率)", yield_str)
-    d3.metric("除淨日 (Ex-Dividend Date)", ex_div_date)
+    d3.metric("最近除淨日 (Ex-Div)", ex_div_date)
     d4.metric("派息日 (Dividend Date)", pay_div_date)
 
     # 繪製三層圖表
