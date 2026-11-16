@@ -19,6 +19,7 @@ currencies = {
     "澳幣 (AUD)": "AUD",
     "台幣 (TWD)": "TWD",
     "人民幣 (CNY)": "CNY",
+    "挪威克朗 (NOK)": "NOK",
 }
 
 @st.cache_data(ttl=300)
