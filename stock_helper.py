@@ -5,6 +5,109 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 import time
+import urllib.request
+import re
+
+# 常用港股及熱門 ETF 中文名稱對照表（即時零延遲）
+HK_STOCK_NAMES = {
+    "0001.HK": "長和",
+    "0002.HK": "中電控股",
+    "0003.HK": "香港中華煤氣",
+    "0005.HK": "匯豐控股",
+    "0006.HK": "電能實業",
+    "0011.HK": "恒生銀行",
+    "0012.HK": "恒基地產",
+    "0016.HK": "新鴻基地產",
+    "0017.HK": "新世界發展",
+    "0027.HK": "銀河娛樂",
+    "0066.HK": "港鐵公司",
+    "0101.HK": "恒隆地產",
+    "0175.HK": "吉利汽車",
+    "0241.HK": "阿里健康",
+    "0267.HK": "中信股份",
+    "0288.HK": "萬洲國際",
+    "0291.HK": "華潤啤酒",
+    "0386.HK": "中國石油化工股份",
+    "0388.HK": "香港交易所",
+    "0669.HK": "創科實業",
+    "0688.HK": "中國海外發展",
+    "0700.HK": "騰訊控股",
+    "0762.HK": "中國聯通",
+    "0823.HK": "領展房產基金",
+    "0857.HK": "中國石油股份",
+    "0883.HK": "中國海洋石油",
+    "0939.HK": "建設銀行",
+    "0941.HK": "中國移動",
+    "0960.HK": "龍湖集團",
+    "0968.HK": "信義光能",
+    "0981.HK": "中芯國際",
+    "0992.HK": "聯想集團",
+    "1038.HK": "長江基建集團",
+    "1044.HK": "恒安國際",
+    "1088.HK": "中國神華",
+    "1093.HK": "石藥集團",
+    "1109.HK": "華潤置地",
+    "1113.HK": "長實集團",
+    "1177.HK": "中國生物製藥",
+    "1211.HK": "比亞迪股份",
+    "1299.HK": "友邦保險",
+    "1398.HK": "工商銀行",
+    "1810.HK": "小米集團－Ｗ",
+    "1876.HK": "百威亞太",
+    "1928.HK": "金沙中國有限公司",
+    "1997.HK": "九龍倉置業",
+    "2007.HK": "碧桂園",
+    "2015.HK": "理想汽車－Ｗ",
+    "2020.HK": "安踏體育",
+    "2269.HK": "藥明生物",
+    "2313.HK": "申洲國際",
+    "2318.HK": "中國平安",
+    "2319.HK": "蒙牛乳業",
+    "2331.HK": "李寧",
+    "2382.HK": "舜宇光學科技",
+    "2388.HK": "中銀香港",
+    "2628.HK": "中國人壽",
+    "2688.HK": "新奧能源",
+    "2800.HK": "盈富基金",
+    "2828.HK": "恒生中國企業",
+    "3033.HK": "南方恒生科技",
+    "3067.HK": "安碩恒生科技",
+    "3110.HK": "Global X 恒生高股息率",
+    "3416.HK": "Global X 國指備兌認購期權主動型ETF",
+    "3419.HK": "Global X 恒指備兌認購期權主動型ETF",
+    "3690.HK": "美團－Ｗ",
+    "3968.HK": "招商銀行",
+    "3988.HK": "中國銀行",
+    "6098.HK": "碧桂園服務",
+    "6618.HK": "京東健康",
+    "6690.HK": "海爾智家",
+    "6862.HK": "海底撈",
+    "9618.HK": "京東集團－ＳＷ",
+    "9633.HK": "農夫山泉",
+    "9868.HK": "小鵬汽車－Ｗ",
+    "9888.HK": "百度集團－ＳＷ",
+    "9961.HK": "攜程集團－Ｓ",
+    "9988.HK": "阿里巴巴－Ｗ",
+    "9999.HK": "網易－Ｓ",
+}
+
+@st.cache_data(ttl=86400)
+def get_hk_chinese_name(ticker_str: str) -> str:
+    """優先從內建對照表取得港股中文名，若不在表中則嘗試從新浪財經即時查詢補充"""
+    if ticker_str in HK_STOCK_NAMES:
+        return HK_STOCK_NAMES[ticker_str]
+    try:
+        code_5 = ticker_str.replace(".HK", "").zfill(5)
+        url = f"https://hq.sinajs.cn/list=rt_hk{code_5}"
+        req = urllib.request.Request(url, headers={"Referer": "https://finance.sina.com.cn"})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            raw = resp.read().decode("gbk", errors="ignore")
+            match = re.search(r'="[^,]+,([^,]+),', raw)
+            if match and match.group(1).strip():
+                return match.group(1).strip()
+    except Exception:
+        pass
+    return ""
 
 # 縮短快取為 15 秒，確保實時更新時能抓到最新盤中報價
 @st.cache_data(ttl=15)
@@ -32,10 +135,7 @@ def render_market_dashboard(market_title: str, default_sym: str, hint_text: str,
     st.title(market_title)
 
     with st.sidebar:
-        # 1. 股票代號輸入框直接放在最上方，一打開就能輸入
         raw_symbol = st.text_input("🔍 輸入股票代號：", value=default_sym, help=hint_text, key=f"sym_{market_type}").upper().strip()
-
-        # 2. 常用圖表與止損設定
         period = st.selectbox("時間範圍：", ["3mo", "6mo", "1y", "2y", "5y"], index=2, key=f"per_{market_type}")
         col_chk1, col_chk2 = st.columns(2)
         with col_chk1:
@@ -44,7 +144,6 @@ def render_market_dashboard(market_title: str, default_sym: str, hint_text: str,
             show_ma = st.checkbox("MA20/50", value=True, key=f"ma_{market_type}")
         trail_pct = st.slider("移動止損 (%)：", min_value=3.0, max_value=20.0, value=8.0, step=0.5, key=f"trail_{market_type}")
 
-        # 3. 自動實時更新開關收在最下方，不佔上方版面
         auto_refresh = st.toggle("⚡ 自動實時更新", value=False, key=f"auto_ref_{market_type}")
         refresh_sec = 30
         if auto_refresh:
@@ -76,8 +175,15 @@ def render_market_dashboard(market_title: str, default_sym: str, hint_text: str,
         st.error(f"找不到代號 `{symbol}` 的數據，請檢查輸入是否正確。")
         return
 
-    stock_name = info.get("shortName") or info.get("longName") or symbol
-    st.subheader(f"{stock_name} (`{symbol}`)")
+    eng_name = info.get("shortName") or info.get("longName") or symbol
+    if market_type == "HK":
+        cn_name = get_hk_chinese_name(symbol)
+        if cn_name:
+            st.subheader(f"{cn_name} — {eng_name} (`{symbol}`)")
+        else:
+            st.subheader(f"{eng_name} (`{symbol}`)")
+    else:
+        st.subheader(f"{eng_name} (`{symbol}`)")
 
     # 計算技術指標
     df["MA20"] = df["Close"].rolling(window=20).mean()
@@ -130,7 +236,7 @@ def render_market_dashboard(market_title: str, default_sym: str, hint_text: str,
     d3.metric("除淨日 (Ex-Dividend Date)", ex_div_date)
     d4.metric("派息日 (Dividend Date)", pay_div_date)
 
-    # 繪製三層圖表：1. K線與均線/布林  2. 成交量 (Volume)  3. RSI (14)
+    # 繪製三層圖表
     fig = make_subplots(
         rows=3, cols=1, shared_xaxes=True,
         vertical_spacing=0.04,
