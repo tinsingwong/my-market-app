@@ -32,29 +32,23 @@ def render_market_dashboard(market_title: str, default_sym: str, hint_text: str,
     st.title(market_title)
 
     with st.sidebar:
-        st.header("⚡ 即時報價更新")
-        if st.button("🔄 立即更新最新股價", use_container_width=True, key=f"refresh_btn_{market_type}"):
-            st.cache_data.clear()
-            st.rerun()
+        # 1. 股票代號輸入框直接放在最上方，一打開就能輸入
+        raw_symbol = st.text_input("🔍 輸入股票代號：", value=default_sym, help=hint_text, key=f"sym_{market_type}").upper().strip()
 
-        auto_refresh = st.toggle("開啟自動實時更新", value=False, key=f"auto_ref_{market_type}")
-        refresh_sec = st.slider(
-            "更新頻率 (秒)：",
-            min_value=15,
-            max_value=120,
-            value=30,
-            step=15,
-            disabled=not auto_refresh,
-            key=f"ref_sec_{market_type}"
-        )
+        # 2. 常用圖表與止損設定
+        period = st.selectbox("時間範圍：", ["3mo", "6mo", "1y", "2y", "5y"], index=2, key=f"per_{market_type}")
+        col_chk1, col_chk2 = st.columns(2)
+        with col_chk1:
+            show_bb = st.checkbox("布林通道", value=True, key=f"bb_{market_type}")
+        with col_chk2:
+            show_ma = st.checkbox("MA20/50", value=True, key=f"ma_{market_type}")
+        trail_pct = st.slider("移動止損 (%)：", min_value=3.0, max_value=20.0, value=8.0, step=0.5, key=f"trail_{market_type}")
 
-        st.divider()
-        st.header("⚙️ 股票與技術指標設定")
-        raw_symbol = st.text_input("輸入股票代號：", value=default_sym, help=hint_text, key=f"sym_{market_type}").upper().strip()
-        period = st.selectbox("選擇時間範圍：", ["3mo", "6mo", "1y", "2y", "5y"], index=2, key=f"per_{market_type}")
-        show_bb = st.checkbox("顯示布林通道 (BB 20, 2)", value=True, key=f"bb_{market_type}")
-        show_ma = st.checkbox("顯示移動平均線 (MA20 / MA50)", value=True, key=f"ma_{market_type}")
-        trail_pct = st.slider("移動止損參考百分比 (%)：", min_value=3.0, max_value=20.0, value=8.0, step=0.5, key=f"trail_{market_type}")
+        # 3. 自動實時更新開關收在最下方，不佔上方版面
+        auto_refresh = st.toggle("⚡ 自動實時更新", value=False, key=f"auto_ref_{market_type}")
+        refresh_sec = 30
+        if auto_refresh:
+            refresh_sec = st.slider("更新頻率 (秒)：", min_value=15, max_value=120, value=30, step=15, key=f"ref_sec_{market_type}")
 
     # 自動格式化各市場代號與幣別
     symbol = raw_symbol
@@ -171,7 +165,6 @@ def render_market_dashboard(market_title: str, default_sym: str, hint_text: str,
     fig.update_layout(height=820, xaxis_rangeslider_visible=False, margin=dict(l=20, r=20, t=40, b=20))
     st.plotly_chart(fig, use_container_width=True)
 
-    # 若開啟自動實時更新，依設定秒數自動刷新
     if auto_refresh:
         time.sleep(refresh_sec)
         st.rerun()
