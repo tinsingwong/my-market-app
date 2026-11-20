@@ -160,7 +160,6 @@ def render_market_dashboard(market_title: str, default_sym: str, hint_text: str,
         with st.form(key=f"search_form_{market_type}", clear_on_submit=True):
             new_sym = st.text_input(
                 "🔍 輸入股票代號：",
-                placeholder=f"目前：{st.session_state[state_key]}（輸入新代號按 Enter）",
                 help=hint_text
             )
             if st.form_submit_button("🔍 查詢", use_container_width=True) and new_sym.strip():
